@@ -3,11 +3,11 @@
   var CIT = (root.CIT = root.CIT || {});
 
   CIT.TYPES = {
-    noble: { name: '贵族', color: '#c9a24a', deep: '#8a6a25', ink: '#2b1f0b' },
-    religious: { name: '宗教', color: '#46709f', deep: '#2b4a6e', ink: '#0c1c2d' },
-    trade: { name: '商业', color: '#4c7d5d', deep: '#2f513b', ink: '#0f2417' },
-    military: { name: '军事', color: '#a34a42', deep: '#6d2c27', ink: '#2a0f0d' },
-    special: { name: '特殊', color: '#7a5a9c', deep: '#4e3768', ink: '#1f1630' }
+    noble: { name: '贵族', word: '金色', color: '#c9a24a', deep: '#8a6a25', ink: '#2b1f0b' },
+    religious: { name: '宗教', word: '蓝色', color: '#46709f', deep: '#2b4a6e', ink: '#0c1c2d' },
+    trade: { name: '商业', word: '绿色', color: '#4c7d5d', deep: '#2f513b', ink: '#0f2417' },
+    military: { name: '军事', word: '红色', color: '#a34a42', deep: '#6d2c27', ink: '#2a0f0d' },
+    special: { name: '特殊', word: '紫色', color: '#7a5a9c', deep: '#4e3768', ink: '#1f1630' }
   };
 
   CIT.CHARACTERS = [
@@ -30,21 +30,21 @@
       detail: '整手交换没有张数限制，即使自己手上没有牌也可以交换。'
     },
     {
-      id: 4, key: 'king', name: '国王', title: '王冠之主', short: '+贵族金币 · 下轮先手',
+      id: 4, key: 'king', name: '国王', title: '王冠之主', short: '+金色建筑金币 · 下轮先手',
       art: 'assets/art/roles/king.webp', art2x: 'assets/art/roles/king@2x.webp',
-      power: '每有 1 座贵族地区获得 1 金币；下回合由你首先选角。',
+      power: '每有 1 座金色（贵族）地区获得 1 金币；下回合由你首先选角。',
       detail: '即使国王被暗杀，皇冠仍会在本轮结束时交给该玩家。'
     },
     {
-      id: 5, key: 'bishop', name: '主教', title: '圣殿守望', short: '+宗教金币 · 免拆迁',
+      id: 5, key: 'bishop', name: '主教', title: '圣殿守望', short: '+蓝色建筑金币 · 免拆迁',
       art: 'assets/art/roles/bishop.webp', art2x: 'assets/art/roles/bishop@2x.webp',
-      power: '每有 1 座宗教地区获得 1 金币；军阀不能破坏你的地区。',
+      power: '每有 1 座蓝色（宗教）地区获得 1 金币；军阀不能破坏你的地区。',
       detail: '若主教被暗杀，本轮军阀可以正常破坏其地区。'
     },
     {
-      id: 6, key: 'merchant', name: '商人', title: '金库之钥', short: '+商业金币 · 额外 1 金',
+      id: 6, key: 'merchant', name: '商人', title: '金库之钥', short: '+绿色建筑金币 · 额外 1 金',
       art: 'assets/art/roles/merchant.webp', art2x: 'assets/art/roles/merchant@2x.webp',
-      power: '每有 1 座商业地区获得 1 金币，并在回合开始时额外获得 1 金币。',
+      power: '每有 1 座绿色（商业）地区获得 1 金币，并在回合开始时额外获得 1 金币。',
       detail: '额外金币与你的行动选择无关，拿金币或抽牌都能拿到。'
     },
     {
@@ -54,9 +54,9 @@
       detail: '额外抽到的两张牌都进入手牌，不占用行动。'
     },
     {
-      id: 8, key: 'warlord', name: '军阀', title: '铁血领主', short: '+军事金币 · 摧毁建筑',
+      id: 8, key: 'warlord', name: '军阀', title: '铁血领主', short: '+红色建筑金币 · 摧毁建筑',
       art: 'assets/art/roles/warlord.webp', art2x: 'assets/art/roles/warlord@2x.webp',
-      power: '每有 1 座军事地区获得 1 金币；可付费摧毁其他玩家的地区。',
+      power: '每有 1 座红色（军事）地区获得 1 金币；可付费摧毁其他玩家的地区。',
       detail: '摧毁费用为地区造价的「造价 - 1」。已建成 8 座地区的城市不可被攻击。'
     }
   ];

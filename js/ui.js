@@ -62,6 +62,15 @@
     return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
   }
 
+  /* 把文案里的颜色词换成「色点 + 颜色词」，一眼看懂对应哪种建筑 */
+  var COLOR_WORDS = { '金色': '#c9a24a', '蓝色': '#46709f', '绿色': '#4c7d5d', '红色': '#a34a42', '紫色': '#7a5a9c' };
+
+  function colorize(s) {
+    return esc(s).replace(/金色|蓝色|绿色|红色|紫色/g, function (w) {
+      return '<i class="cw" style="--c:' + COLOR_WORDS[w] + '"></i>' + w;
+    });
+  }
+
   function cardHTML(d, o) {
     o = o || {};
     var t = T[d.type] || T.special;
@@ -103,7 +112,7 @@
       '<span class="cc-medal">' + CIT.ICONS[c.key] + '</span>' +
       '<span class="cc-name">' + c.name + '</span>' +
       '<span class="cc-title">' + c.title + '</span>' +
-      '<span class="cc-power">' + c.short + '</span>' +
+      '<span class="cc-power">' + colorize(c.short) + '</span>' +
       '<span class="cc-ribbon">已排除</span>' +
       '</button>';
   }
@@ -857,8 +866,17 @@
     if (!g || !g.pending || g.pending.type !== 'draft') return;
     var options = g.pending.options.slice().sort(function (a, b) { return a - b; });
     var excluded = g.excludedKnown.slice();
+    var picker = g.players[g.pending.playerId];
 
-    var body = '<div class="ex-block">' +
+    var cityRow = picker.city.length
+      ? picker.city.map(function (d) { return cardHTML(d, { mini: true, uid: false, zone: 'city' }); }).join('')
+      : '<p class="muted-note" style="padding:4px 2px">王城还没有建筑，本轮先攒金币或拿手牌。</p>';
+
+    var body = '<div class="ex-block draft-city">' +
+      '<div class="ex-head"><span>你的王城 · ' + picker.city.length + ' 座 · ' + picker.gold + ' 金币</span>' +
+      '<em>照建筑颜色选收入角色</em></div>' +
+      '<div class="draft-city-row">' + cityRow + '</div></div>' +
+      '<div class="ex-block">' +
       '<div class="ex-head"><span>本回合排除的角色</span><em>这 3 位不会登场</em></div>' +
       '<div class="ex-row">' +
       '<div class="ex-card ex-back"><span class="ex-q">?</span><span class="ex-name">未知</span></div>' +
@@ -868,7 +886,6 @@
       '<div class="char-note" id="char-note">点击角色查看能力。选中的角色只有你自己知道。</div>';
 
     var duo = g.humanIds.length > 1;
-    var picker = g.players[g.pending.playerId];
 
     UI.openSheet({
       title: duo ? picker.name + ' · 秘密选角' : '秘密选择角色',
@@ -1446,12 +1463,12 @@
         ' alt="" loading="lazy" decoding="async" onerror="this.style.display=\'none\'">' +
         '<div class="hr-body"><div class="hr-rank">No.' + c.id + '</div>' +
         '<div class="hr-name">' + esc(c.name) + '</div>' +
-        '<div class="hr-power">' + esc(c.short) + '</div></div></div>';
+        '<div class="hr-power">' + colorize(c.short) + '</div></div></div>';
     }).join('');
 
     var colors = ['noble', 'religious', 'trade', 'military', 'special'].map(function (t) {
       var ty = CIT.TYPES[t];
-      return '<span class="help-color"><i style="background:' + ty.color + '"></i>' + ty.name + '</span>';
+      return '<span class="help-color"><i style="background:' + ty.color + '"></i>' + ty.word + ' · ' + ty.name + '</span>';
     }).join('');
 
     var dists = CIT.DISTRICTS.filter(function (d) { return d.type === 'special'; }).map(function (d) {
@@ -1471,7 +1488,7 @@
         '<div class="group-label"><span>基本流程</span></div>' + flow +
         '<div class="group-label"><span>五色城区</span></div>' +
         '<div class="help-colors">' + colors + '</div>' +
-        '<p class="muted-note" style="padding-top:6px">国王-贵族 · 主教-宗教 · 商人-商业 · 军阀-军事：城里每有 1 座对应颜色地区，收工资时多拿 1 金币。</p>' +
+        '<p class="muted-note" style="padding-top:6px">收入看建筑颜色：国王收金色 · 主教收蓝色 · 商人收绿色 · 军阀收红色 —— 城里每有 1 座对应颜色的地区，收工资时多拿 1 金币。</p>' +
         '<div class="group-label"><span>八位角色（按 1→8 顺序行动）</span></div>' +
         '<div class="help-roles">' + roles + '</div>' +
         '<div class="group-label"><span>特殊建筑（紫卡）</span></div>' +

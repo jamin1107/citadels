@@ -344,20 +344,20 @@
       var n1 = E.incomeCount(p, 'noble');
       p.gold += n1;
       p.crown = true;
-      E.log(g, p.name + ' · 国王加冕，贵族地区 ' + n1 + ' 座，+' + n1 + ' 金币', 'income');
+      E.log(g, p.name + ' · 国王加冕，金色（贵族）地区 ' + n1 + ' 座，+' + n1 + ' 金币', 'income');
     } else if (cid === 5) {
       var n2 = E.incomeCount(p, 'religious');
       p.gold += n2;
       g.bishopProtection = true;
-      E.log(g, p.name + ' · 主教布道，宗教地区 ' + n2 + ' 座，+' + n2 + ' 金币', 'income');
+      E.log(g, p.name + ' · 主教布道，蓝色（宗教）地区 ' + n2 + ' 座，+' + n2 + ' 金币', 'income');
     } else if (cid === 6) {
       var n3 = E.incomeCount(p, 'trade');
       p.gold += 1 + n3;
-      E.log(g, p.name + ' · 商人经营，商业地区 ' + n3 + ' 座，+' + (n3 + 1) + ' 金币', 'income');
+      E.log(g, p.name + ' · 商人经营，绿色（商业）地区 ' + n3 + ' 座，+' + (n3 + 1) + ' 金币', 'income');
     } else if (cid === 8) {
       var n4 = E.incomeCount(p, 'military');
       p.gold += n4;
-      E.log(g, p.name + ' · 军阀征税，军事地区 ' + n4 + ' 座，+' + n4 + ' 金币', 'income');
+      E.log(g, p.name + ' · 军阀征税，红色（军事）地区 ' + n4 + ' 座，+' + n4 + ' 金币', 'income');
     }
   }
 

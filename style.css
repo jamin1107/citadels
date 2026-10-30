@@ -1137,6 +1137,22 @@ html, body {
 .ex-head em { font-style: normal; font-size: 9px; color: var(--muted); }
 .ex-row { display: flex; gap: 8px; justify-content: center; }
 
+/* 选角弹层 · 自己的王城 */
+.draft-city-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 2px 2px; }
+.draft-city-row .dcard { flex: 0 0 72px; min-height: 108px; }
+
+/* 文案内颜色小圆点 */
+.cw {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin: 0 3px 0 1px;
+  background: var(--c, #c9a24a);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .22);
+  vertical-align: baseline;
+}
+
 .ex-card {
   position: relative;
   flex: 1 1 0;
