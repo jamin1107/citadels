@@ -225,9 +225,7 @@
     UI.net = null;
     UI.netBusy = 0;
     var duo = UI.mode === 'duo';
-    var names = duo
-      ? ['玩家 1', '玩家 2', '灰烬伯爵', '银月女爵']
-      : ['你', '灰烬伯爵', '银月女爵', '锈剑骑士'];
+    var names = ['玩家1', '玩家2', '玩家3', '玩家4'];
     var humanIds = duo ? [0, 1] : [0];
     UI.g = E.createGame({ playerCount: count, humanIds: humanIds, names: names });
     UI.resultsShown = false;

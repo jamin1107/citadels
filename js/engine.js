@@ -166,7 +166,7 @@
     if (opts.humanIds) humanIds = opts.humanIds.slice(0);
     else if (humanIndex === -1) humanIds = [];
     else humanIds = [humanIndex];
-    var allNames = opts.names || ['你', '灰烬伯爵', '银月女爵', '锈剑骑士'];
+    var allNames = opts.names || ['玩家1', '玩家2', '玩家3', '玩家4'];
     var players = [];
     for (var i = 0; i < count; i++) {
       players.push({

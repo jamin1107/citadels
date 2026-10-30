@@ -308,7 +308,7 @@
     }
 
     html += '<div class="net-connected"><b>已入座</b><span>房主</span>' +
-      connected.map(function (s) { return '<span>玩家 ' + (s + 1) + '</span>'; }).join('') +
+      connected.map(function (s) { return '<span>玩家' + (s + 1) + '</span>'; }).join('') +
       '</div>';
 
     if (canAdd && !peer) html += '<button class="btn" id="net-add">添加下一位玩家</button>';
@@ -465,7 +465,7 @@
     sm.openSeat = null;
     var count = sm.count;
     var humanIds = [0].concat(seats);
-    var names = ['房主', '玩家 2', '玩家 3', '玩家 4'];
+    var names = ['玩家1', '玩家2', '玩家3', '玩家4'];
     var g = E.createGame({ playerCount: count, humanIds: humanIds, names: names });
     var UI = CIT.UI;
     UI.g = g;
