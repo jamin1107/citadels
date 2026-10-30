@@ -1,0 +1,949 @@
+/* 富饶之城 · 界面与交互 */
+(function () {
+  var CIT = window.CIT;
+  var E = CIT.Engine;
+  var T = CIT.TYPES;
+
+  var COIN = '<svg class="coin-ico" viewBox="0 0 24 24" aria-hidden="true">' +
+    '<circle cx="12" cy="12" r="9.2" fill="#f0d79b" stroke="#8a6a2c" stroke-width="1.2"/>' +
+    '<path d="M12 6.6l1.7 3.5 3.9.6-2.8 2.7.7 3.9-3.5-1.9-3.5 1.9.7-3.9-2.8-2.7 3.9-.6L12 6.6z" fill="#a67c33" opacity=".72"/></svg>';
+
+  var POWER_LABEL = { 1: '暗杀', 2: '行窃', 3: '施法', 8: '摧毁' };
+
+  var UI = {
+    g: null,
+    count: 4,
+    timer: null,
+    toastTimer: null,
+    sheetOpen: false,
+    sheetDismissible: false,
+    resultsShown: false,
+    selectedUid: null
+  };
+  CIT.UI = UI;
+
+  var el = {};
+
+  function $(id) { return document.getElementById(id); }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function roleIcon(id) {
+    var d = E.charDef(id);
+    return d ? CIT.ICONS[d.key] : '';
+  }
+
+  function typeColor(card) {
+    var t = T[card.type] || T.special;
+    return t.color;
+  }
+
+  function cardHTML(d, o) {
+    o = o || {};
+    var t = T[d.type] || T.special;
+    var cls = 'dcard' + (o.mini ? ' mini' : '') + (o.cls ? ' ' + o.cls : '');
+    var attrs = o.uid === false ? '' : ' data-uid="' + d.uid + '" data-zone="' + (o.zone || 'hand') + '"';
+    return '<div class="' + cls + '" style="--c:' + t.color + '"' + attrs + '>' +
+      '<div class="dcard-top"><span class="cost">' + d.cost + '</span>' +
+      '<span class="dtype">' + t.name + '</span></div>' +
+      '<div class="dcard-art">' + (CIT.BUILDINGS[d.type] || '') + '</div>' +
+      '<div class="dcard-name">' + esc(d.name) + '</div>' +
+      '</div>';
+  }
+
+  function charCardHTML(id, o) {
+    o = o || {};
+    var c = E.charDef(id);
+    var cls = 'char-card' + (o.disabled ? ' disabled' : '') + (o.selected ? ' selected' : '');
+    return '<button type="button" class="' + cls + '" data-char="' + id + '">' +
+      '<span class="char-rank">' + id + '</span>' +
+      '<span class="char-icon">' + CIT.ICONS[c.key] + '</span>' +
+      '<span class="char-name">' + c.name + '</span>' +
+      '<span class="char-sub">' + c.short + '</span>' +
+      '</button>';
+  }
+
+  /* ---------------- 初始化 ---------------- */
+
+  UI.init = function () {
+    el.start = $('start');
+    el.overlay = $('overlay');
+    el.round = $('hud-round');
+    el.phase = $('hud-phase');
+    el.crown = $('hud-crown');
+    el.opponents = $('opponents');
+    el.meta = $('board-meta');
+    el.city = $('city');
+    el.hint = $('hint-line');
+    el.roleChip = $('role-chip');
+    el.goldChip = $('gold-chip');
+    el.hand = $('hand');
+    el.actionbar = $('actionbar');
+    el.toast = $('toast');
+
+    $('btn-start').addEventListener('click', function () { UI.startGame(UI.count); });
+    $('btn-rules').addEventListener('click', function () { UI.showHelp(); });
+
+    var seg = $('count-seg');
+    seg.addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-count]');
+      if (!b) return;
+      UI.count = parseInt(b.getAttribute('data-count'), 10);
+      Array.prototype.forEach.call(seg.querySelectorAll('button'), function (x) {
+        x.classList.toggle('on', x === b);
+      });
+    });
+
+    document.addEventListener('click', function (e) {
+      var act = e.target.closest('[data-act]');
+      if (act && UI.g) {
+        UI.onAct(act.getAttribute('data-act'));
+        return;
+      }
+      var card = e.target.closest('[data-uid]');
+      if (card && !UI.sheetOpen) {
+        var uid = parseInt(card.getAttribute('data-uid'), 10);
+        var zone = card.getAttribute('data-zone');
+        if (zone === 'hand') UI.onHandCard(uid);
+        else UI.showCardInfo(uid);
+        return;
+      }
+      var opp = e.target.closest('[data-opp]');
+      if (opp && !UI.sheetOpen) UI.showOpponent(parseInt(opp.getAttribute('data-opp'), 10));
+    });
+
+    document.addEventListener('click', function (e) {
+      if (e.target === el.overlay && UI.sheetDismissible) UI.closeSheet();
+    });
+  };
+
+  /* ---------------- 开局 ---------------- */
+
+  UI.startGame = function (count) {
+    UI.count = count;
+    UI.g = E.createGame({ playerCount: count });
+    UI.resultsShown = false;
+    UI.sheetOpen = false;
+    UI.sheetDismissible = false;
+    el.overlay.classList.add('hidden');
+    el.overlay.innerHTML = '';
+    el.start.classList.add('hidden');
+    el.toast.textContent = '';
+    el.toast.classList.remove('show');
+    UI.render();
+    UI.pump();
+  };
+
+  UI.backHome = function () {
+    UI.closeSheet(false);
+    UI.g = null;
+    clearTimeout(UI.timer);
+    el.start.classList.remove('hidden');
+  };
+
+  /* ---------------- 主驱动 ---------------- */
+
+  UI.pump = function () {
+    clearTimeout(UI.timer);
+    var g = UI.g;
+    if (!g) return;
+    if (UI.sheetOpen) return;
+    if (g.over) { UI.render(); UI.showResults(true); return; }
+    if (g.pending && g.pending.type === 'draft') {
+      UI.render();
+      UI.showDraft();
+      return;
+    }
+    if (g.humanTurn) { UI.render(); return; }
+
+    var r = E.step(g);
+    UI.render();
+    UI.flash();
+
+    if (g.over) { UI.showResults(true); return; }
+    if (g.pending && g.pending.type === 'draft') { UI.showDraft(); return; }
+    if (g.humanTurn) return;
+
+    var delay = 820;
+    if (r === 'reveal') delay = 1000;
+    else if (r === 'aiTurn') delay = 1050;
+    else if (r === 'draftPick') delay = 480;
+    else if (r === 'roundStart') delay = 900;
+    UI.timer = setTimeout(UI.pump, delay);
+  };
+
+  UI.flash = function () {
+    var g = UI.g;
+    if (!g || !g.log || !g.log.length) return;
+    var last = g.log[g.log.length - 1];
+    UI.toastMsg(last.text);
+  };
+
+  UI.toastMsg = function (text) {
+    if (!text) return;
+    el.toast.textContent = text;
+    el.toast.classList.add('show');
+    clearTimeout(UI.toastTimer);
+    UI.toastTimer = setTimeout(function () { el.toast.classList.remove('show'); }, 2800);
+  };
+
+  /* ---------------- 渲染 ---------------- */
+
+  UI.render = function () {
+    var g = UI.g;
+    if (!g) return;
+    renderHud(g);
+    renderOpponents(g);
+    renderBoard(g);
+    renderHand(g);
+    renderAction(g);
+  };
+
+  function renderHud(g) {
+    el.round.textContent = '第 ' + Math.max(1, g.round) + ' 回合';
+
+    var text = '准备中';
+    if (g.phase === 'draft') text = '秘密选角';
+    else if (g.phase === 'play') {
+      if (g.humanTurn) text = '你的回合';
+      else text = '角色 ' + g.playPtr + ' / 8';
+    } else if (g.over) text = '对局结算';
+    if (g.firstTo8 != null && !g.over) text = '最后一轮 · ' + text;
+    el.phase.textContent = text;
+    el.phase.classList.toggle('live', !!g.humanTurn);
+
+    var c = g.players[g.crown];
+    el.crown.innerHTML = CIT.ICONS.king + '<span>皇冠 · ' + esc(c.name) + '</span>';
+  }
+
+  function renderOpponents(g) {
+    var html = '';
+    g.players.forEach(function (p) {
+      if (p.isHuman) return;
+      var cur = g.phase === 'play' && !g.over && g.holders[g.playPtr] === p.id;
+      var role;
+      if (p.roleRevealed && p.role) {
+        var def = E.charDef(p.role);
+        role = '<div class="opp-role role-face" style="color:' + T.noble.deep + '">' +
+          CIT.ICONS[def.key] + '<b>' + def.name + '</b></div>';
+      } else {
+        role = '<div class="role-back">?</div>';
+      }
+      var pct = Math.min(100, p.city.length / 8 * 100);
+      html += '<div class="opp' + (cur ? ' is-current' : '') + '" data-opp="' + p.id + '">' +
+        role +
+        '<div class="opp-body">' +
+        '<div class="opp-name">' + esc(p.name) + '</div>' +
+        '<div class="opp-stats">' +
+        '<span class="g">' + COIN + p.gold + '</span>' +
+        '<span>牌 ' + p.hand.length + '</span>' +
+        '<span>城 ' + p.city.length + '</span>' +
+        '</div>' +
+        '<div class="opp-bar"><i style="width:' + pct + '%"></i></div>' +
+        '</div></div>';
+    });
+    el.opponents.innerHTML = html;
+  }
+
+  function renderBoard(g) {
+    var p = g.players[g.humanId];
+    if (!p) return;
+    var base = 0;
+    p.city.forEach(function (d) { base += (d.value || d.cost); });
+    el.meta.textContent = p.city.length + ' / 8 座 · ' + base + ' 分';
+
+    var html = '';
+    p.city.forEach(function (d) { html += cardHTML(d, { mini: true, zone: 'city' }); });
+    for (var i = p.city.length; i < 8; i++) html += '<div class="slot-empty">＋</div>';
+    el.city.innerHTML = html;
+
+    var hint = '';
+    if (g.over) hint = '对局结束，点击「查看结算」查看本局得分。';
+    else if (g.phase === 'draft') hint = '从剩余角色中秘密选择一位，其余角色会被后续城主取走。';
+    else if (g.humanTurn) {
+      if (!g.humanTurn.actionDone) hint = '先执行行动：拿 2 金币，或抽 2 张保留 1 张。';
+      else if (g.humanTurn.buildsLeft > 0) hint = '点击下方手牌即可建造，本回合还可建造 ' + g.humanTurn.buildsLeft + ' 座。';
+      else hint = '本回合建造次数已用完。你仍可使用角色能力，然后结束回合。';
+    } else hint = '等待其他城主行动……';
+    el.hint.textContent = hint;
+  }
+
+  function renderHand(g) {
+    var p = g.players[g.humanId];
+    if (!p) return;
+
+    var ht = g.humanTurn;
+    var canBuild = !!(ht && ht.actionDone && ht.buildsLeft > 0);
+
+    el.goldChip.innerHTML = COIN + '<span>' + p.gold + '</span>';
+    if (p.role) {
+      var def = E.charDef(p.role);
+      el.roleChip.innerHTML = CIT.ICONS[def.key] + '<span>' + def.name + '</span>';
+    } else {
+      el.roleChip.innerHTML = '<span>待选角</span>';
+    }
+
+    var cards = p.hand.slice().sort(function (a, b) { return a.cost - b.cost || a.name.localeCompare(b.name); });
+    if (!cards.length) {
+      el.hand.innerHTML = '<div class="hand-empty">暂无手牌</div>';
+      return;
+    }
+    el.hand.innerHTML = cards.map(function (c) {
+      var cls = '';
+      if (canBuild) cls = E.buildIssue(p, c) ? 'unaffordable' : 'buildable';
+      return cardHTML(c, { cls: cls });
+    }).join('');
+  }
+
+  function renderAction(g) {
+    if (g.over) {
+      el.actionbar.innerHTML = '<div class="ab-top"><span class="role-tag">对局结束</span>' +
+        '<span class="ab-hint">' + (g.firstTo8 != null ? '最后一轮已完成' : '') + '</span></div>' +
+        '<div class="ab-btns"><button class="btn primary" data-act="results">查看结算</button></div>';
+      return;
+    }
+
+    if (g.pending && g.pending.type === 'draft') {
+      el.actionbar.innerHTML = '<div class="wait-row"><span class="pulse-dot"></span>正在秘密选择角色…</div>';
+      return;
+    }
+
+    if (!g.humanTurn) {
+      var wait = '等待其他城主行动…';
+      if (g.phase === 'play') {
+        var holder = g.holders[g.playPtr];
+        if (holder != null && g.revealed[g.playPtr]) {
+          wait = '【' + E.charName(g.playPtr) + '】' + g.players[holder].name + ' 行动中…';
+        } else {
+          wait = '等待第 ' + g.playPtr + ' 顺位角色登场…';
+        }
+      }
+      el.actionbar.innerHTML = '<div class="wait-row"><span class="pulse-dot"></span>' + wait + '</div>';
+      return;
+    }
+
+    var ht = g.humanTurn;
+    var p = g.players[g.humanId];
+    var def = E.charDef(ht.charId);
+    var top = '<div class="ab-top"><span class="role-tag">' + CIT.ICONS[def.key] + def.name + '</span>' +
+      '<span class="ab-hint">' + (ht.actionDone ? '剩余建造 ' + ht.buildsLeft + ' 次' : '选择行动') + '</span></div>';
+
+    var btns = '';
+    if (!ht.actionDone) {
+      btns += '<button class="btn primary" data-act="gold"><span class="act-k">行动一</span>拿 2 金币</button>';
+      btns += '<button class="btn" data-act="cards"><span class="act-k">行动二</span>抽 2 选 1</button>';
+      if (POWER_LABEL[ht.charId] && !ht.powerUsed) {
+        btns += '<button class="btn" data-act="power" style="flex:0 0 76px">' + POWER_LABEL[ht.charId] + '</button>';
+      }
+    } else {
+      if (POWER_LABEL[ht.charId] && !ht.powerUsed) {
+        btns += '<button class="btn" data-act="power" style="flex:0 1 92px">' + POWER_LABEL[ht.charId] + '</button>';
+      }
+      if (E.has(p, 'lab') && !ht.labUsed) {
+        btns += '<button class="btn" data-act="lab" style="flex:0 1 84px">实验室</button>';
+      }
+      if (E.has(p, 'smithy') && !ht.smithyUsed && p.gold >= 2) {
+        btns += '<button class="btn" data-act="smithy" style="flex:0 1 84px">铁匠铺</button>';
+      }
+      btns += '<button class="btn primary" data-act="end" style="flex:1 1 120px">结束回合</button>';
+    }
+
+    el.actionbar.innerHTML = top + '<div class="ab-btns">' + btns + '</div>';
+  }
+
+  /* ---------------- 主界面交互 ---------------- */
+
+  UI.onAct = function (act) {
+    var g = UI.g;
+    if (!g) return;
+
+    if (act === 'help') { UI.showHelp(); return; }
+    if (act === 'log') { UI.showLog(); return; }
+    if (act === 'results') { UI.resultsShown = false; UI.showResults(true); return; }
+
+    var ht = g.humanTurn;
+    var p = g.players[g.humanId];
+
+    if (act === 'gold') {
+      if (!ht) return;
+      if (E.humanTakeGold(g)) { UI.render(); UI.flash(); }
+      return;
+    }
+    if (act === 'cards') {
+      if (!ht) return;
+      var res = E.humanTakeCards(g);
+      UI.render();
+      UI.flash();
+      if (res && res.cards && res.cards.length && ht.drawn) UI.showDrawPick(res.cards, res.keep);
+      return;
+    }
+    if (act === 'power') { UI.openPower(); return; }
+    if (act === 'end') {
+      if (!ht) return;
+      if (E.endHumanTurn(g)) { UI.render(); UI.pump(); }
+      return;
+    }
+    if (act === 'lab') { UI.showLabPicker(); return; }
+    if (act === 'smithy') {
+      var r = E.humanSmithy(g);
+      UI.render();
+      UI.flash();
+      if (!r.ok) UI.toastMsg(r.msg);
+      return;
+    }
+  };
+
+  UI.onHandCard = function (uid) {
+    var g = UI.g;
+    if (!g) return;
+    var p = g.players[g.humanId];
+    var ht = g.humanTurn;
+    if (ht && !ht.actionDone) {
+      UI.toastMsg('请先执行行动：拿金币或抽卡');
+      return;
+    }
+    if (ht && ht.actionDone && ht.buildsLeft > 0) {
+      UI.showBuildConfirm(uid);
+      return;
+    }
+    UI.showCardInfo(uid);
+  };
+
+  /* ---------------- 弹层基础 ---------------- */
+
+  UI.openSheet = function (o) {
+    clearTimeout(UI.timer);
+    UI.sheetOpen = true;
+    UI.sheetDismissible = !!o.dismissible;
+    el.overlay.innerHTML = '<div class="sheet">' +
+      '<div class="sheet-grab"></div>' +
+      '<div class="sheet-head"><h2>' + o.title + '</h2>' + (o.sub ? '<p>' + o.sub + '</p>' : '') + '</div>' +
+      '<div class="sheet-body">' + o.body + '</div>' +
+      (o.footer ? '<div class="sheet-foot">' + o.footer + '</div>' : '') +
+      '</div>';
+    el.overlay.classList.remove('hidden');
+    if (o.onMount) o.onMount(el.overlay.querySelector('.sheet'));
+  };
+
+  UI.closeSheet = function (resume) {
+    UI.sheetOpen = false;
+    UI.sheetDismissible = false;
+    el.overlay.classList.add('hidden');
+    el.overlay.innerHTML = '';
+    if (resume !== false && UI.g) UI.pump();
+  };
+
+  /* ---------------- 选角 ---------------- */
+
+  UI.showDraft = function () {
+    var g = UI.g;
+    if (!g || !g.pending || g.pending.type !== 'draft') return;
+    var options = g.pending.options.slice().sort(function (a, b) { return a - b; });
+    var excluded = g.excludedKnown.slice();
+
+    var body = '<div class="excluded-row"><span class="tag">公开排除</span>' +
+      excluded.map(function (id) { return '<span class="tag">' + E.charName(id) + '</span>'; }).join('') +
+      '<span class="tag back">1 张未知</span></div>' +
+      '<div class="char-grid">' + options.map(function (id) { return charCardHTML(id); }).join('') + '</div>' +
+      '<div class="char-note" id="char-note">点击角色查看能力。选中的角色只有你自己知道。</div>';
+
+    UI.openSheet({
+      title: '秘密选择角色',
+      sub: '当前可用 ' + options.length + ' 位角色，选择后其余角色会传给下一位城主。',
+      body: body,
+      footer: '<button class="btn primary" id="draft-confirm" disabled>确认选择</button>',
+      onMount: function (root) {
+        var sel = null;
+        var note = root.querySelector('#char-note');
+        var confirm = root.querySelector('#draft-confirm');
+        root.querySelectorAll('[data-char]').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            sel = parseInt(btn.getAttribute('data-char'), 10);
+            root.querySelectorAll('[data-char]').forEach(function (x) { x.classList.remove('selected'); });
+            btn.classList.add('selected');
+            var c = E.charDef(sel);
+            note.innerHTML = '<b style="color:#f2dfae">' + c.name + ' · ' + c.title + '</b><br>' + c.detail;
+            confirm.disabled = false;
+          });
+        });
+        confirm.addEventListener('click', function () {
+          if (sel == null) return;
+          if (!E.pickCharacter(g, sel)) return;
+          UI.closeSheet(false);
+          UI.render();
+          UI.pump();
+        });
+      }
+    });
+  };
+
+  /* ---------------- 行动：抽牌保留 ---------------- */
+
+  UI.showDrawPick = function (cards, keep) {
+    var picked = [];
+    var body = '<div class="hand-picks" id="draw-picks">' +
+      cards.map(function (c) { return cardHTML(c, { uid: false, cls: '' }).replace('<div class="dcard"', '<div class="dcard" data-draw="' + c.uid + '"'); }).join('') +
+      '</div><p class="muted-note">从抽到的 ' + cards.length + ' 张中保留 ' + keep + ' 张，其余放回牌堆底部。</p>';
+
+    UI.openSheet({
+      title: '抽牌行动',
+      sub: '点击选择要保留的地区卡。',
+      body: body,
+      footer: '<button class="btn primary" id="draw-confirm" disabled>保留 ' + keep + ' 张</button>',
+      onMount: function (root) {
+        var btn = root.querySelector('#draw-confirm');
+        root.querySelectorAll('[data-draw]').forEach(function (elCard) {
+          elCard.addEventListener('click', function () {
+            var uid = parseInt(elCard.getAttribute('data-draw'), 10);
+            var idx = picked.indexOf(uid);
+            if (idx >= 0) { picked.splice(idx, 1); elCard.classList.remove('selected'); }
+            else if (picked.length < keep) { picked.push(uid); elCard.classList.add('selected'); }
+            btn.disabled = picked.length !== keep;
+            btn.textContent = '保留 ' + picked.length + ' / ' + keep + ' 张';
+          });
+        });
+        btn.addEventListener('click', function () {
+          if (picked.length !== keep) return;
+          if (!E.humanChooseDrawn(UI.g, picked)) return;
+          UI.closeSheet(false);
+          UI.render();
+          UI.flash();
+        });
+      }
+    });
+  };
+
+  /* ---------------- 角色能力 ---------------- */
+
+  UI.openPower = function () {
+    var g = UI.g;
+    var ht = g && g.humanTurn;
+    if (!ht) return;
+    if (ht.charId === 1) return assassinPicker(g, ht);
+    if (ht.charId === 2) return thiefPicker(g, ht);
+    if (ht.charId === 3) return magicianPicker(g, ht);
+    if (ht.charId === 8) return warlordPicker(g, ht);
+    UI.toastMsg('这个角色没有主动技能');
+  };
+
+  function assassinPicker(g, ht) {
+    var ids = [1, 2, 3, 4, 5, 6, 7, 8].filter(function (id) { return id !== ht.charId; });
+    var body = '<p class="muted-note">被选中的角色本轮直接跳过，不会获得金币也不会建造。灰色角色已知不在场。</p>' +
+      '<div class="char-grid">' + ids.map(function (id) {
+        return charCardHTML(id, { disabled: g.excludedKnown.indexOf(id) >= 0 });
+      }).join('') + '</div>';
+    charPicker({
+      title: '暗杀',
+      sub: '选择一位角色。刺客不能刺杀自己。',
+      body: body,
+      ids: ids,
+      canPick: function (id) { return g.excludedKnown.indexOf(id) < 0; },
+      onConfirm: function (id) {
+        if (!E.humanAssassinate(g, id)) { UI.toastMsg('无法选择该角色'); return; }
+        UI.closeSheet(false); UI.render(); UI.flash();
+      }
+    });
+  }
+
+  function thiefPicker(g, ht) {
+    var ids = [1, 2, 3, 4, 5, 6, 7, 8].filter(function (id) {
+      return id !== 1 && id !== g.killed && id !== ht.charId && g.excludedKnown.indexOf(id) < 0;
+    });
+    var body = '<p class="muted-note">不能选择刺客、刺客的目标，或自己持有的角色。对方行动开始前，其金币全部归你。</p>' +
+      '<div class="char-grid">' + ids.map(function (id) { return charCardHTML(id); }).join('') + '</div>';
+    charPicker({
+      title: '行窃',
+      sub: '选择一位角色的钱袋。',
+      body: body,
+      ids: ids,
+      canPick: function () { return true; },
+      onConfirm: function (id) {
+        if (!E.humanSteal(g, id)) { UI.toastMsg('无法选择该角色'); return; }
+        UI.closeSheet(false); UI.render(); UI.flash();
+      }
+    });
+  }
+
+  function charPicker(o) {
+    UI.openSheet({
+      title: o.title,
+      sub: o.sub,
+      body: o.body,
+      footer: '<button class="btn ghost" id="pick-cancel">放弃</button>' +
+        '<button class="btn primary" id="pick-ok" disabled style="flex:2 1 0">确认</button>',
+      dismissible: true,
+      onMount: function (root) {
+        var sel = null;
+        var ok = root.querySelector('#pick-ok');
+        root.querySelectorAll('[data-char]').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var id = parseInt(btn.getAttribute('data-char'), 10);
+            if (!o.canPick(id)) { UI.toastMsg('该角色已知不在场'); return; }
+            sel = id;
+            root.querySelectorAll('[data-char]').forEach(function (x) { x.classList.remove('selected'); });
+            btn.classList.add('selected');
+            ok.disabled = false;
+          });
+        });
+        ok.addEventListener('click', function () { if (sel != null) o.onConfirm(sel); });
+        root.querySelector('#pick-cancel').addEventListener('click', function () { UI.closeSheet(); });
+      }
+    });
+  }
+
+  function magicianPicker(g, ht) {
+    var p = g.players[g.humanId];
+    var others = g.players.filter(function (o) { return o.id !== p.id; });
+    var body = '<div class="group-label"><span>交换全部手牌</span><span>对方手牌数公开</span></div>' +
+      '<div class="pick-list">' + others.map(function (o) {
+        return '<button type="button" class="pick-row" data-swap="' + o.id + '">' +
+          '<span class="pr-ico">' + CIT.ICONS.magician + '</span>' +
+          '<span class="pr-main"><span class="pr-title">' + esc(o.name) + '</span>' +
+          '<span class="pr-sub">手牌 ' + o.hand.length + ' 张 · 金币 ' + o.gold + '</span></span></button>';
+      }).join('') + '</div>' +
+      '<div class="group-label"><span>弃牌重抽</span><span>可多选</span></div>' +
+      '<div class="hand-picks">' + p.hand.map(function (c) {
+        return cardHTML(c, { uid: false }).replace('<div class="dcard"', '<div class="dcard" data-mag="' + c.uid + '"');
+      }).join('') + '</div>' +
+      '<p class="muted-note">选择一名玩家交换整手牌；或选择若干手牌弃掉，再抽等量的新牌。点空白处关闭 = 放弃能力。</p>';
+
+    UI.openSheet({
+      title: '施法',
+      sub: '魔术师可以交换手牌，或弃牌换取新牌。',
+      body: body,
+      footer: '<button class="btn" id="mag-swap" disabled>交换手牌</button>' +
+        '<button class="btn primary" id="mag-discard" disabled>重抽 0 张</button>',
+      dismissible: true,
+      onMount: function (root) {
+        var swapId = null;
+        var picked = [];
+        var swapBtn = root.querySelector('#mag-swap');
+        var discBtn = root.querySelector('#mag-discard');
+
+        root.querySelectorAll('[data-swap]').forEach(function (row) {
+          row.addEventListener('click', function () {
+            swapId = parseInt(row.getAttribute('data-swap'), 10);
+            root.querySelectorAll('[data-swap]').forEach(function (x) { x.classList.remove('selected'); });
+            row.classList.add('selected');
+            swapBtn.disabled = false;
+            // 交换与弃牌互斥
+            picked = [];
+            root.querySelectorAll('[data-mag]').forEach(function (x) { x.classList.remove('selected'); });
+            discBtn.disabled = true;
+            discBtn.textContent = '重抽 0 张';
+          });
+        });
+
+        root.querySelectorAll('[data-mag]').forEach(function (card) {
+          card.addEventListener('click', function () {
+            var uid = parseInt(card.getAttribute('data-mag'), 10);
+            var idx = picked.indexOf(uid);
+            if (idx >= 0) { picked.splice(idx, 1); card.classList.remove('selected'); }
+            else { picked.push(uid); card.classList.add('selected'); }
+            discBtn.disabled = picked.length === 0;
+            discBtn.textContent = '重抽 ' + picked.length + ' 张';
+            if (picked.length) {
+              swapId = null;
+              root.querySelectorAll('[data-swap]').forEach(function (x) { x.classList.remove('selected'); });
+              swapBtn.disabled = true;
+            }
+          });
+        });
+
+        swapBtn.addEventListener('click', function () {
+          if (swapId == null) return;
+          if (!E.humanMagicianSwap(g, swapId)) { UI.toastMsg('交换失败'); return; }
+          UI.closeSheet(false); UI.render(); UI.flash();
+        });
+
+        discBtn.addEventListener('click', function () {
+          if (!picked.length) return;
+          if (!E.humanMagicianDiscard(g, picked)) { UI.toastMsg('弃牌失败'); return; }
+          UI.closeSheet(false); UI.render(); UI.flash();
+        });
+      }
+    });
+  }
+
+  function warlordPicker(g, ht) {
+    var p = g.players[g.humanId];
+    var targets = E.humanWarlordTargets(g).filter(function (t) { return t.ownerId !== p.id; });
+    if (!targets.length) {
+      UI.toastMsg('没有可以摧毁的地区');
+      return;
+    }
+    var byOwner = {};
+    targets.forEach(function (t) {
+      (byOwner[t.ownerId] = byOwner[t.ownerId] || []).push(t);
+    });
+
+    var body = '';
+    Object.keys(byOwner).forEach(function (pid) {
+      var owner = E.playerById(g, Number(pid));
+      body += '<div class="group-label"><span>' + esc(owner.name) + '</span><span>' + owner.city.length + ' 座地区</span></div>' +
+        '<div class="pick-list">' + byOwner[pid].map(function (t) {
+          var can = p.gold >= t.cost;
+          return '<button type="button" class="pick-row' + (can ? '' : ' disabled') + '" data-dist="' + t.district.uid + '" data-owner="' + t.ownerId + '">' +
+            '<span class="pr-ico" style="color:' + typeColor(t.district) + '">' + CIT.BUILDINGS[t.district.type] + '</span>' +
+            '<span class="pr-main"><span class="pr-title">' + esc(t.district.name) + '</span>' +
+            '<span class="pr-sub">造价 ' + t.district.cost + ' · ' + T[t.district.type].name + '</span></span>' +
+            '<span class="pr-cost' + (can ? '' : ' warn') + '">' + t.cost + ' 金币</span></button>';
+        }).join('') + '</div>';
+    });
+    body += '<p class="muted-note">摧毁费用 = 造价 - 1。主教所在城市、已建成 8 座的城市与堡垒不可摧毁；长城会让费用 +1。</p>';
+
+    UI.openSheet({
+      title: '摧毁地区',
+      sub: '选择要付钱拆毁的地区。',
+      body: body,
+      footer: '<button class="btn ghost" id="w-cancel">放弃</button>' +
+        '<button class="btn primary" id="w-ok" disabled style="flex:2 1 0">确认摧毁</button>',
+      dismissible: true,
+      onMount: function (root) {
+        var sel = null;
+        var ok = root.querySelector('#w-ok');
+        root.querySelectorAll('[data-dist]').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            sel = { owner: parseInt(btn.getAttribute('data-owner'), 10), uid: parseInt(btn.getAttribute('data-dist'), 10) };
+            root.querySelectorAll('[data-dist]').forEach(function (x) { x.classList.remove('selected'); });
+            btn.classList.add('selected');
+            var cost = root.querySelectorAll('[data-dist]').length ? btn.querySelector('.pr-cost').textContent : '';
+            ok.textContent = '确认吞并（' + cost + '）';
+            ok.disabled = false;
+          });
+        });
+        ok.addEventListener('click', function () {
+          if (!sel) return;
+          var r = E.humanWarlordDestroy(g, sel.owner, sel.uid);
+          if (!r.ok) { UI.toastMsg(r.msg); return; }
+          UI.closeSheet(false); UI.render(); UI.flash();
+        });
+        root.querySelector('#w-cancel').addEventListener('click', function () { UI.closeSheet(); });
+      }
+    });
+  }
+
+  /* ---------------- 实验室 ---------------- */
+
+  UI.showLabPicker = function () {
+    var g = UI.g;
+    var p = g.players[g.humanId];
+    if (!p || !p.hand.length) { UI.toastMsg('没有手牌可弃'); return; }
+    var body = '<div class="hand-picks">' + p.hand.map(function (c) {
+      return cardHTML(c, { uid: false }).replace('<div class="dcard"', '<div class="dcard" data-lab="' + c.uid + '"');
+    }).join('') + '</div><p class="muted-note">丢弃 1 张手牌，获得 1 金币。每回合一次。</p>';
+
+    UI.openSheet({
+      title: '实验室',
+      sub: '弃 1 张手牌换 1 金币。',
+      body: body,
+      footer: '<button class="btn ghost" id="lab-cancel">取消</button>',
+      dismissible: true,
+      onMount: function (root) {
+        root.querySelectorAll('[data-lab]').forEach(function (card) {
+          card.addEventListener('click', function () {
+            var uid = parseInt(card.getAttribute('data-lab'), 10);
+            var r = E.humanLab(g, uid);
+            if (!r.ok) { UI.toastMsg(r.msg); return; }
+            UI.closeSheet(false); UI.render(); UI.flash();
+          });
+        });
+        root.querySelector('#lab-cancel').addEventListener('click', function () { UI.closeSheet(); });
+      }
+    });
+  };
+
+  /* ---------------- 建造确认 ---------------- */
+
+  UI.showBuildConfirm = function (uid) {
+    var g = UI.g;
+    var p = g.players[g.humanId];
+    var card = null;
+    p.hand.forEach(function (c) { if (c.uid === uid) card = c; });
+    if (!card) return;
+
+    var issue = E.buildIssue(p, card);
+    var t = T[card.type];
+    var note = card.type === 'special' ? (CIT.SPECIAL_NOTES[card.key] || '') : '';
+    var body = '<div style="display:flex;gap:14px;align-items:flex-start">' +
+      '<div style="flex:0 0 96px">' + cardHTML(card, { uid: false }) + '</div>' +
+      '<div style="flex:1 1 auto;min-width:0;font-size:11px;line-height:1.7;color:#9ba5b7">' +
+      '<b style="font-family:' + "'Songti SC',serif" + ';font-size:15px;color:#f2dfae;letter-spacing:.08em">' + esc(card.name) + '</b><br>' +
+      t.name + '地区 · 造价 ' + card.cost + ' 金币<br>终局计分 ' + (card.value || card.cost) + ' 分' +
+      (note ? '<br><span style="color:#d8b166">' + note + '</span>' : '') +
+      (issue ? '<br><span style="color:#c25a50">' + issue + '</span>' : '') +
+      '</div></div>';
+
+    UI.openSheet({
+      title: '建造地区',
+      sub: '支付造价后放入你的王城。',
+      body: body,
+      footer: '<button class="btn ghost" id="build-cancel">取消</button>' +
+        '<button class="btn primary" id="build-ok" ' + (issue ? 'disabled' : '') + ' style="flex:2 1 0">建造（-' + card.cost + ' 金币）</button>',
+      dismissible: true,
+      onMount: function (root) {
+        root.querySelector('#build-cancel').addEventListener('click', function () { UI.closeSheet(); });
+        var ok = root.querySelector('#build-ok');
+        ok.addEventListener('click', function () {
+          var r = E.humanBuild(g, uid);
+          if (!r.ok) { UI.toastMsg(r.msg); return; }
+          UI.closeSheet(false);
+          UI.render();
+          UI.flash();
+        });
+      }
+    });
+  };
+
+  /* ---------------- 信息面板 ---------------- */
+
+  UI.showCardInfo = function (uid) {
+    var g = UI.g;
+    var card = null;
+    var owner = null;
+    g.players.forEach(function (p) {
+      p.hand.forEach(function (c) { if (c.uid === uid) { card = c; owner = p; } });
+    });
+    if (!card) return;
+    var t = T[card.type];
+    var note = card.type === 'special' ? (CIT.SPECIAL_NOTES[card.key] || '') : '';
+    var body = '<div style="display:flex;gap:14px">' +
+      '<div style="flex:0 0 96px">' + cardHTML(card, { uid: false }) + '</div>' +
+      '<div style="flex:1 1 auto;font-size:11px;line-height:1.7;color:#9ba5b7">' +
+      '<b style="font-family:' + "'Songti SC',serif" + ';font-size:15px;color:#f2dfae;letter-spacing:.08em">' + esc(card.name) + '</b><br>' +
+      t.name + '地区 · 造价 ' + card.cost + ' 金币<br>终局计分 ' + (card.value || card.cost) + ' 分' +
+      (note ? '<br><span style="color:#d8b166">' + note + '</span>' : '') +
+      '</div></div>';
+    UI.openSheet({
+      title: '地区卡',
+      sub: owner && owner.isHuman ? '这张牌在你的手中。' : '来自你的手牌。',
+      body: body,
+      footer: '<button class="btn ghost" id="info-close">关闭</button>',
+      dismissible: true,
+      onMount: function (root) {
+        root.querySelector('#info-close').addEventListener('click', function () { UI.closeSheet(); });
+      }
+    });
+  };
+
+  UI.showOpponent = function (pid) {
+    var g = UI.g;
+    var p = E.playerById(g, pid);
+    if (!p) return;
+    var role = p.roleRevealed && p.role
+      ? E.charDef(p.role).name
+      : '未知（尚未登场）';
+    var body = '<div class="group-label"><span>' + esc(p.name) + ' 的王城</span>' +
+      '<span>' + p.city.length + ' 座 · 金币 ' + p.gold + ' · 手牌 ' + p.hand.length + '</span></div>' +
+      (p.city.length
+        ? '<div class="city">' + p.city.map(function (d) { return cardHTML(d, { mini: true, uid: false }); }).join('') + '</div>'
+        : '<p class="muted-note">这座城市还空空如也。</p>') +
+      '<p class="muted-note">本回合角色：' + role + '</p>';
+
+    UI.openSheet({
+      title: '查看城主',
+      sub: '城市与资源都是公开信息，角色则可能仍在暗处。',
+      body: body,
+      footer: '<button class="btn ghost" id="opp-close">关闭</button>',
+      dismissible: true,
+      onMount: function (root) {
+        root.querySelector('#opp-close').addEventListener('click', function () { UI.closeSheet(); });
+      }
+    });
+  };
+
+  /* ---------------- 结算 ---------------- */
+
+  UI.showResults = function (force) {
+    var g = UI.g;
+    if (!g || !g.results) return;
+    if (UI.resultsShown && !force) return;
+    if (g.results && g.results.length && UI.sheetOpen && !force) return;
+    UI.resultsShown = true;
+
+    var rows = g.results.map(function (r, i) {
+      return '<div class="score-row' + (r.winner ? ' win' : '') + '">' +
+        '<div class="score-rank">' + (r.winner ? '♛' : (i + 1)) + '</div>' +
+        '<div class="score-main"><div class="score-name' + (r.isHuman ? ' you' : '') + '">' +
+        esc(r.name) + (r.isHuman ? '（你）' : '') + '</div>' +
+        '<div class="score-sub">' + r.districts + ' 座地区 · 基础 ' + r.base +
+        ' + 五色 ' + r.colorBonus + ' + 八座 ' + r.firstBonus + '</div></div>' +
+        '<div class="score-total">' + r.total + '</div></div>';
+    }).join('');
+
+    UI.openSheet({
+      title: '王城结算',
+      sub: g.results[0].winner && g.results[0].isHuman ? '你的王城赢得了本局荣耀。' : '得分最高的城主获得胜利。',
+      body: rows + '<p class="muted-note">计分规则：全部地区造价之和；集齐五色 +3；首位建成 8 座 +4，其余达成 8 座 +2。同分并列。</p>',
+      footer: '<button class="btn ghost" id="res-home">回到首页</button>' +
+        '<button class="btn primary" id="res-again" style="flex:2 1 0">再来一局</button>',
+      onMount: function (root) {
+        root.querySelector('#res-home').addEventListener('click', function () {
+          UI.closeSheet(false);
+          UI.backHome();
+        });
+        root.querySelector('#res-again').addEventListener('click', function () {
+          UI.closeSheet(false);
+          UI.startGame(UI.count);
+        });
+      }
+    });
+  };
+
+  /* ---------------- 日志 / 规则 ---------------- */
+
+  UI.showLog = function () {
+    var g = UI.g;
+    if (!g) return;
+    var html = '<div class="log-list">';
+    var last = 0;
+    g.log.forEach(function (l) {
+      if (l.round !== last) {
+        last = l.round;
+        html += '<div class="log-round">第 ' + last + ' 回合</div>';
+      }
+      html += '<div class="log-item ' + l.kind + '">' + esc(l.text) + '</div>';
+    });
+    html += '</div>';
+
+    UI.openSheet({
+      title: '对局日志',
+      sub: '完整的公开信息记录。',
+      body: html,
+      footer: '<button class="btn ghost" id="log-close">关闭</button>',
+      dismissible: true,
+      onMount: function (root) {
+        root.querySelector('#log-close').addEventListener('click', function () { UI.closeSheet(); });
+        var body = root.querySelector('.sheet-body');
+        body.scrollTop = body.scrollHeight;
+      }
+    });
+  };
+
+  UI.showHelp = function () {
+    var items = CIT.copy.rules.map(function (r, i) {
+      return '<div class="rule-item"><span>' + (i + 1) + '</span><span>' + r + '</span></div>';
+    }).join('');
+    var roles = CIT.CHARACTERS.map(function (c) {
+      return '<div class="rule-item"><span>' + c.id + '</span><span><b style="color:#f2dfae">' + c.name + '</b> · ' + c.power + '</span></div>';
+    }).join('');
+
+    UI.openSheet({
+      title: '规则速览',
+      sub: '复刻经典桌游《富饶之城》，对阵 2–3 位 AI 城主。',
+      body: '<div class="group-label"><span>基本流程</span></div>' + items +
+        '<div class="group-label"><span>八位角色</span></div>' + roles +
+        '<p class="muted-note">特殊地区卡的额外效果会在卡牌详情中说明。鬼城计分时可视为任意颜色；魔法学院计算收入时可视为任意颜色。墓地会自动触发（付 1 金币取回被摧毁的地区）。<br><br>本作为单人对战 AI 的复刻版：3 人桌同样以 8 座地区结束；官方 2 人双角色模式未包含。</p>',
+      footer: '<button class="btn ghost" id="help-close">关闭</button>',
+      dismissible: true,
+      onMount: function (root) {
+        root.querySelector('#help-close').addEventListener('click', function () { UI.closeSheet(); });
+      }
+    });
+  };
+
+  document.addEventListener('DOMContentLoaded', UI.init);
+})();
