@@ -63,72 +63,131 @@
 
   /* 地区卡：65 张（贵族 12 / 宗教 11 / 军事 11 / 商业 20 / 特殊 11） */
   CIT.DISTRICTS = [
-    { key: 'manor', name: '庄园', cost: 3, type: 'noble', copies: 5 },
-    { key: 'castle', name: '城堡', cost: 4, type: 'noble', copies: 4 },
+    {
+      key: 'manor', name: '庄园', cost: 3, type: 'noble', copies: 5,
+      art: 'assets/art/districts/manor.webp', art2x: 'assets/art/districts/manor@2x.webp'
+    },
+    {
+      key: 'castle', name: '城堡', cost: 4, type: 'noble', copies: 4,
+      art: 'assets/art/districts/castle.webp', art2x: 'assets/art/districts/castle@2x.webp'
+    },
     {
       key: 'palace', name: '宫殿', cost: 5, type: 'noble', copies: 3,
       art: 'assets/art/districts/palace.webp', art2x: 'assets/art/districts/palace@2x.webp'
     },
 
-    { key: 'temple', name: '神庙', cost: 1, type: 'religious', copies: 3 },
-    { key: 'church', name: '教堂', cost: 2, type: 'religious', copies: 3 },
-    { key: 'monastery', name: '修道院', cost: 3, type: 'religious', copies: 3 },
-    { key: 'cathedral', name: '大教堂', cost: 5, type: 'religious', copies: 2 },
+    {
+      key: 'temple', name: '神庙', cost: 1, type: 'religious', copies: 3,
+      art: 'assets/art/districts/temple.webp', art2x: 'assets/art/districts/temple@2x.webp'
+    },
+    {
+      key: 'church', name: '教堂', cost: 2, type: 'religious', copies: 3,
+      art: 'assets/art/districts/church.webp', art2x: 'assets/art/districts/church@2x.webp'
+    },
+    {
+      key: 'monastery', name: '修道院', cost: 3, type: 'religious', copies: 3,
+      art: 'assets/art/districts/monastery.webp', art2x: 'assets/art/districts/monastery@2x.webp'
+    },
+    {
+      key: 'cathedral', name: '大教堂', cost: 5, type: 'religious', copies: 2,
+      art: 'assets/art/districts/cathedral.webp', art2x: 'assets/art/districts/cathedral@2x.webp'
+    },
 
-    { key: 'watchtower', name: '瞭望塔', cost: 1, type: 'military', copies: 3 },
-    { key: 'prison', name: '监狱', cost: 2, type: 'military', copies: 3 },
-    { key: 'battlefield', name: '战场', cost: 3, type: 'military', copies: 3 },
-    { key: 'fort', name: '要塞', cost: 5, type: 'military', copies: 2 },
+    {
+      key: 'watchtower', name: '瞭望塔', cost: 1, type: 'military', copies: 3,
+      art: 'assets/art/districts/watchtower.webp', art2x: 'assets/art/districts/watchtower@2x.webp'
+    },
+    {
+      key: 'prison', name: '监狱', cost: 2, type: 'military', copies: 3,
+      art: 'assets/art/districts/prison.webp', art2x: 'assets/art/districts/prison@2x.webp'
+    },
+    {
+      key: 'battlefield', name: '战场', cost: 3, type: 'military', copies: 3,
+      art: 'assets/art/districts/battlefield.webp', art2x: 'assets/art/districts/battlefield@2x.webp'
+    },
+    {
+      key: 'fort', name: '要塞', cost: 5, type: 'military', copies: 2,
+      art: 'assets/art/districts/fort.webp', art2x: 'assets/art/districts/fort@2x.webp'
+    },
 
-    { key: 'tavern', name: '酒馆', cost: 1, type: 'trade', copies: 5 },
-    { key: 'storehouse', name: '商栈', cost: 2, type: 'trade', copies: 3 },
-    { key: 'market', name: '集市', cost: 2, type: 'trade', copies: 4 },
-    { key: 'dock', name: '船坞', cost: 3, type: 'trade', copies: 3 },
-    { key: 'harbor', name: '港口', cost: 4, type: 'trade', copies: 3 },
-    { key: 'townhall', name: '市政厅', cost: 5, type: 'trade', copies: 2 },
+    {
+      key: 'tavern', name: '酒馆', cost: 1, type: 'trade', copies: 5,
+      art: 'assets/art/districts/tavern.webp', art2x: 'assets/art/districts/tavern@2x.webp'
+    },
+    {
+      key: 'storehouse', name: '商栈', cost: 2, type: 'trade', copies: 3,
+      art: 'assets/art/districts/storehouse.webp', art2x: 'assets/art/districts/storehouse@2x.webp'
+    },
+    {
+      key: 'market', name: '集市', cost: 2, type: 'trade', copies: 4,
+      art: 'assets/art/districts/market.webp', art2x: 'assets/art/districts/market@2x.webp'
+    },
+    {
+      key: 'dock', name: '船坞', cost: 3, type: 'trade', copies: 3,
+      art: 'assets/art/districts/dock.webp', art2x: 'assets/art/districts/dock@2x.webp'
+    },
+    {
+      key: 'harbor', name: '港口', cost: 4, type: 'trade', copies: 3,
+      art: 'assets/art/districts/harbor.webp', art2x: 'assets/art/districts/harbor@2x.webp'
+    },
+    {
+      key: 'townhall', name: '市政厅', cost: 5, type: 'trade', copies: 2,
+      art: 'assets/art/districts/townhall.webp', art2x: 'assets/art/districts/townhall@2x.webp'
+    },
 
     {
       key: 'library', name: '图书馆', cost: 6, type: 'special', copies: 1,
+      art: 'assets/art/districts/library.webp', art2x: 'assets/art/districts/library@2x.webp',
       note: '抽卡行动改为保留抽到的全部地区卡'
     },
     {
       key: 'dragon_gate', name: '巨龙门', cost: 6, type: 'special', copies: 1, value: 8,
+      art: 'assets/art/districts/dragon_gate.webp', art2x: 'assets/art/districts/dragon_gate@2x.webp',
       note: '建造需 6 金币，终局计 8 分'
     },
     {
       key: 'university', name: '大学', cost: 6, type: 'special', copies: 1, value: 8,
+      art: 'assets/art/districts/university.webp', art2x: 'assets/art/districts/university@2x.webp',
       note: '建造需 6 金币，终局计 8 分'
     },
     {
       key: 'observatory', name: '天文台', cost: 5, type: 'special', copies: 1,
+      art: 'assets/art/districts/observatory.webp', art2x: 'assets/art/districts/observatory@2x.webp',
       note: '抽卡行动改为抽 3 张保留 1 张'
     },
     {
       key: 'graveyard', name: '墓地', cost: 5, type: 'special', copies: 1,
+      art: 'assets/art/districts/graveyard.webp', art2x: 'assets/art/districts/graveyard@2x.webp',
       note: '你的地区被摧毁时，可付 1 金币把该牌收回手中（自动触发）'
     },
     {
       key: 'ghost_town', name: '鬼城', cost: 2, type: 'special', copies: 1,
+      art: 'assets/art/districts/ghost_town.webp', art2x: 'assets/art/districts/ghost_town@2x.webp',
       note: '终局计分时可视为任意一种颜色'
     },
     {
       key: 'magic_school', name: '魔法学院', cost: 6, type: 'special', copies: 1,
+      art: 'assets/art/districts/magic_school.webp', art2x: 'assets/art/districts/magic_school@2x.webp',
       note: '计算角色金币收入时可视为任意颜色'
     },
     {
       key: 'lab', name: '实验室', cost: 5, type: 'special', copies: 1,
+      art: 'assets/art/districts/lab.webp', art2x: 'assets/art/districts/lab@2x.webp',
       note: '每回合一次：弃 1 张手牌换 1 金币'
     },
     {
       key: 'smithy', name: '铁匠铺', cost: 5, type: 'special', copies: 1,
+      art: 'assets/art/districts/smithy.webp', art2x: 'assets/art/districts/smithy@2x.webp',
       note: '每回合一次：支付 2 金币抽 3 张地区卡'
     },
     {
       key: 'fortress', name: '堡垒', cost: 3, type: 'special', copies: 1,
+      art: 'assets/art/districts/fortress.webp', art2x: 'assets/art/districts/fortress@2x.webp',
       note: '不会被军阀摧毁'
     },
     {
       key: 'great_wall', name: '长城', cost: 6, type: 'special', copies: 1,
+      art: 'assets/art/districts/great_wall.webp', art2x: 'assets/art/districts/great_wall@2x.webp',
       note: '军阀摧毁你其它地区时必须多付 1 金币'
     }
   ];
