@@ -29,7 +29,8 @@
 
   <section class="board" id="board">
     <div class="board-head">
-      <span class="board-title">我的王城</span>
+      <span class="board-title" id="board-title">我的王城</span>
+      <div class="view-tabs hidden" id="view-tabs"></div>
       <span class="board-meta" id="board-meta"></span>
     </div>
     <div class="city" id="city"></div>
@@ -39,7 +40,7 @@
   <section class="dock">
     <div class="hand-head">
       <div class="hand-left">
-        <span class="hand-title">手牌</span>
+        <span class="hand-title" id="hand-title">手牌</span>
         <span class="role-chip" id="role-chip"></span>
       </div>
       <span class="gold-chip" id="gold-chip"></span>
@@ -53,6 +54,7 @@
 </div>
 
 <div id="overlay" class="overlay hidden"></div>
+<div id="pass" class="pass-screen hidden"></div>
 
 <div id="start" class="start">
   <div class="start-inner">
@@ -79,10 +81,16 @@
     <div class="start-rule"><span></span><em>CITADELS</em><span></span></div>
     <p class="start-tagline">八位角色，五色城区。<br>猜透对手，建成最富饶的王城。</p>
 
+    <div class="seg mode-seg" id="mode-seg">
+      <button data-mode="solo" class="on">单人挑战</button>
+      <button data-mode="duo">双人同屏</button>
+    </div>
+
     <div class="seg" id="count-seg">
       <button data-count="3">3 人桌</button>
       <button data-count="4" class="on">4 人桌</button>
     </div>
+    <p class="mode-note" id="mode-note">你 + 3 位 AI 城主。</p>
 
     <button class="btn primary big" id="btn-start">开始游戏</button>
     <button class="btn ghost" id="btn-rules">规则速览</button>

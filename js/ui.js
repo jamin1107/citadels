@@ -13,6 +13,11 @@
   var UI = {
     g: null,
     count: 4,
+    mode: 'solo',
+    viewId: 0,
+    pass: null,
+    unlockedKey: null,
+    lastActive: null,
     timer: null,
     toastTimer: null,
     sheetOpen: false,
@@ -112,17 +117,33 @@
     el.opponents = $('opponents');
     el.status = $('statusbar');
     el.meta = $('board-meta');
+    el.title = $('board-title');
+    el.viewTabs = $('view-tabs');
     el.city = $('city');
     el.hint = $('hint-line');
     el.roleChip = $('role-chip');
+    el.handTitle = $('hand-title');
     el.goldChip = $('gold-chip');
     el.hand = $('hand');
     el.actionbar = $('actionbar');
     el.eventLayer = $('event-layer');
     el.toast = $('toast');
+    el.pass = $('pass');
+    el.modeNote = $('mode-note');
 
-    $('btn-start').addEventListener('click', function () { UI.startGame(UI.count); });
+    $('btn-start').addEventListener('click', function () { UI.startGame(UI.count, UI.mode); });
     $('btn-rules').addEventListener('click', function () { UI.showHelp(); });
+
+    var modeSeg = $('mode-seg');
+    modeSeg.addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-mode]');
+      if (!b) return;
+      UI.mode = b.getAttribute('data-mode');
+      Array.prototype.forEach.call(modeSeg.querySelectorAll('button'), function (x) {
+        x.classList.toggle('on', x === b);
+      });
+      UI.updateModeNote();
+    });
 
     var seg = $('count-seg');
     seg.addEventListener('click', function (e) {
@@ -132,9 +153,16 @@
       Array.prototype.forEach.call(seg.querySelectorAll('button'), function (x) {
         x.classList.toggle('on', x === b);
       });
+      UI.updateModeNote();
     });
 
     document.addEventListener('click', function (e) {
+      var viewBtn = e.target.closest('[data-view]');
+      if (viewBtn && UI.g && !UI.sheetOpen && !UI.pass) {
+        UI.viewId = parseInt(viewBtn.getAttribute('data-view'), 10);
+        UI.render();
+        return;
+      }
       var act = e.target.closest('[data-act]');
       if (act && UI.g) {
         UI.onAct(act.getAttribute('data-act'));
@@ -155,18 +183,41 @@
     document.addEventListener('click', function (e) {
       if (e.target === el.overlay && UI.sheetDismissible) UI.closeSheet();
     });
+
+    UI.updateModeNote();
+  };
+
+  UI.updateModeNote = function () {
+    if (!el.modeNote) return;
+    if (UI.mode === 'duo') {
+      el.modeNote.textContent = '2 位玩家轮流持机 + ' + (UI.count - 2) + ' 位 AI 城主 · 手牌与未公开角色会隐藏';
+    } else {
+      el.modeNote.textContent = '你 + ' + (UI.count - 1) + ' 位 AI 城主';
+    }
   };
 
   /* ---------------- 开局 ---------------- */
 
-  UI.startGame = function (count) {
+  UI.startGame = function (count, mode) {
+    UI.mode = mode || UI.mode || 'solo';
     UI.count = count;
-    UI.g = E.createGame({ playerCount: count });
+    var duo = UI.mode === 'duo';
+    var names = duo
+      ? ['玩家 1', '玩家 2', '灰烬伯爵', '银月女爵']
+      : ['你', '灰烬伯爵', '银月女爵', '锈剑骑士'];
+    var humanIds = duo ? [0, 1] : [0];
+    UI.g = E.createGame({ playerCount: count, humanIds: humanIds, names: names });
     UI.resultsShown = false;
     UI.sheetOpen = false;
     UI.sheetDismissible = false;
+    UI.viewId = 0;
+    UI.pass = null;
+    UI.unlockedKey = null;
+    UI.lastActive = null;
     el.overlay.classList.add('hidden');
     el.overlay.innerHTML = '';
+    el.pass.classList.add('hidden');
+    el.pass.innerHTML = '';
     el.start.classList.add('hidden');
     el.toast.textContent = '';
     el.toast.classList.remove('show');
@@ -178,33 +229,104 @@
   UI.backHome = function () {
     UI.closeSheet(false);
     UI.g = null;
+    UI.pass = null;
+    UI.unlockedKey = null;
+    UI.lastActive = null;
+    el.pass.classList.add('hidden');
+    el.pass.innerHTML = '';
     clearTimeout(UI.timer);
     el.start.classList.remove('hidden');
   };
 
   /* ---------------- 主驱动 ---------------- */
 
+  UI.syncView = function (g) {
+    var active = g.humanTurn ? g.humanTurn.playerId : (g.pending ? g.pending.playerId : -1);
+    if (active >= 0) {
+      if (UI.lastActive !== active) {
+        UI.viewId = active;
+        UI.lastActive = active;
+      }
+    } else {
+      UI.lastActive = -1;
+    }
+  };
+
+  UI.showPass = function (g, kind, playerId, key) {
+    var p = g.players[playerId];
+    UI.pass = { kind: kind, playerId: playerId, key: key };
+    var kicker = kind === 'draft' ? '第 ' + g.round + ' 回合 · 秘密选角' : '轮到你行动';
+    var roleLine = (kind === 'turn' && g.humanTurn) ? '本轮角色：' + E.charName(g.humanTurn.charId) : '';
+    el.pass.innerHTML = '<div class="pass-card">' +
+      '<div class="pass-eyebrow">' + kicker + '</div>' +
+      '<div class="pass-avatar">' + (playerId + 1) + '</div>' +
+      '<h2>请交给 ' + esc(p.name) + '</h2>' +
+      (roleLine ? '<div class="pass-role">' + roleLine + '</div>' : '') +
+      '<p>其他玩家请暂时移开视线。<br>点击下方按钮后，只有 ' + esc(p.name) + ' 能看到手牌与秘密角色。</p>' +
+      '<button class="btn primary" id="pass-go">我是 ' + esc(p.name) + ' · 开始</button>' +
+      '</div>';
+    el.pass.classList.remove('hidden');
+    var btn = el.pass.querySelector('#pass-go');
+    btn.addEventListener('click', function () {
+      UI.unlockedKey = key;
+      UI.pass = null;
+      el.pass.classList.add('hidden');
+      el.pass.innerHTML = '';
+      UI.pump();
+    });
+  };
+
   UI.pump = function () {
     clearTimeout(UI.timer);
     var g = UI.g;
     if (!g) return;
-    if (UI.sheetOpen) return;
+    if (UI.pass || UI.sheetOpen) return;
     if (g.over) { UI.render(); UI.showResults(true); return; }
+
     if (g.pending && g.pending.type === 'draft') {
+      UI.syncView(g);
       UI.render();
+      var dkey = 'draft:' + g.pending.playerId + ':' + g.round;
+      if (UI.mode === 'duo' && UI.unlockedKey !== dkey) {
+        UI.showPass(g, 'draft', g.pending.playerId, dkey);
+        return;
+      }
       UI.showDraft();
       return;
     }
-    if (g.humanTurn) { UI.render(); return; }
+
+    if (g.humanTurn) {
+      UI.syncView(g);
+      UI.render();
+      var tkey = 'turn:' + g.humanTurn.playerId + ':' + g.round + ':' + g.humanTurn.charId;
+      if (UI.mode === 'duo' && UI.unlockedKey !== tkey) {
+        UI.showPass(g, 'turn', g.humanTurn.playerId, tkey);
+        return;
+      }
+      return;
+    }
 
     var mark = g.log.length;
     var r = E.step(g);
+    UI.syncView(g);
     UI.render();
     UI.flash(mark);
 
     if (g.over) { UI.showResults(true); return; }
-    if (g.pending && g.pending.type === 'draft') { UI.showDraft(); return; }
-    if (g.humanTurn) return;
+
+    // 人类回合要立即盖住屏幕，避免另一位玩家看到手牌
+    if (g.humanTurn) {
+      var tkey2 = 'turn:' + g.humanTurn.playerId + ':' + g.round + ':' + g.humanTurn.charId;
+      if (UI.mode === 'duo' && UI.unlockedKey !== tkey2) {
+        UI.showPass(g, 'turn', g.humanTurn.playerId, tkey2);
+      }
+      return;
+    }
+
+    if (g.pending) {
+      UI.timer = setTimeout(UI.pump, 520);
+      return;
+    }
 
     var delay = 820;
     if (r === 'reveal') delay = 1000;
@@ -226,7 +348,7 @@
     }
     if (!ev) ev = logs[logs.length - 1];
     var meta = ev.meta;
-    var me = g.players[g.humanId];
+    var me = g.humanIds.length === 1 ? g.players[g.humanId] : null;
 
     if (meta) {
       var who = function (id) {
@@ -338,7 +460,7 @@
   function renderStatus(g) {
     var chips = '';
     if (!g.over && g.phase === 'play') {
-      var me = g.players[g.humanId];
+      var me = g.humanIds.length === 1 ? g.players[g.humanId] : null;
       if (g.killed) {
         var mine = me && me.role === g.killed;
         var label = mine ? '你被暗杀' : (g.killedSkipped ? '已跳过' : '暗杀目标');
@@ -363,7 +485,9 @@
     var text = '准备中';
     if (g.phase === 'draft') text = '秘密选角';
     else if (g.phase === 'play') {
-      if (g.humanTurn) text = '你的回合';
+      if (g.humanTurn) text = g.humanIds.length > 1
+        ? g.players[g.humanTurn.playerId].name + ' 的回合'
+        : '你的回合';
       else text = '角色 ' + g.playPtr + ' / 8';
     } else if (g.over) text = '对局结算';
     if (g.firstTo8 != null && !g.over) text = '最后一轮 · ' + text;
@@ -376,8 +500,9 @@
 
   function renderOpponents(g) {
     var html = '';
+    var viewPid = g.humanIds.length > 1 ? UI.viewId : g.humanId;
     g.players.forEach(function (p) {
-      if (p.isHuman) return;
+      if (p.id === viewPid) return;
       var cur = g.phase === 'play' && !g.over && g.holders[g.playPtr] === p.id;
       var role;
       if (p.roleRevealed && p.role) {
@@ -405,11 +530,27 @@
   }
 
   function renderBoard(g) {
-    var p = g.players[g.humanId];
+    var duo = g.humanIds.length > 1;
+    var p = g.players[duo ? UI.viewId : g.humanId];
     if (!p) return;
     var base = 0;
     p.city.forEach(function (d) { base += (d.value || d.cost); });
-    el.meta.textContent = p.city.length + ' / 8 座 · ' + base + ' 分';
+    el.meta.textContent = p.city.length + ' / 8 座 · ' + base + ' 分' + (duo ? ' · ' + p.gold + ' 金币' : '');
+
+    if (el.title && el.viewTabs) {
+      if (duo) {
+        el.title.classList.add('hidden');
+        el.viewTabs.classList.remove('hidden');
+        el.viewTabs.innerHTML = g.humanIds.map(function (id) {
+          return '<button type="button" class="view-tab' + (id === UI.viewId ? ' on' : '') +
+            '" data-view="' + id + '">' + esc(g.players[id].name) + '</button>';
+        }).join('');
+      } else {
+        el.title.classList.remove('hidden');
+        el.viewTabs.classList.add('hidden');
+        el.viewTabs.innerHTML = '';
+      }
+    }
 
     var html = '';
     p.city.forEach(function (d) { html += cardHTML(d, { mini: true, zone: 'city' }); });
@@ -418,34 +559,57 @@
 
     var hint = '';
     if (g.over) hint = '对局结束，点击「查看结算」查看本局得分。';
-    else if (g.phase === 'draft') hint = '从剩余角色中秘密选择一位，其余角色会被后续城主取走。';
-    else if (g.humanTurn) {
-      if (!g.humanTurn.actionDone) hint = '先执行行动：拿 2 金币，或抽 2 张保留 1 张。';
-      else if (g.humanTurn.buildsLeft > 0) hint = '点击下方手牌即可建造，本回合还可建造 ' + g.humanTurn.buildsLeft + ' 座。';
-      else hint = '本回合建造次数已用完。你仍可使用角色能力，然后结束回合。';
+    else if (g.phase === 'draft') {
+      hint = g.humanIds.length > 1 && g.pending
+        ? '正在由 ' + g.players[g.pending.playerId].name + ' 秘密选角…'
+        : '从剩余角色中秘密选择一位，其余角色会被后续城主取走。';
+    } else if (g.humanTurn) {
+      if (!duo || g.humanTurn.playerId === p.id) {
+        if (!g.humanTurn.actionDone) hint = '先执行行动：拿 2 金币，或抽 2 张保留 1 张。';
+        else if (g.humanTurn.buildsLeft > 0) hint = '点击下方手牌即可建造，本回合还可建造 ' + g.humanTurn.buildsLeft + ' 座。';
+        else hint = '本回合建造次数已用完。你仍可使用角色能力，然后结束回合。';
+      } else {
+        hint = '正在等待 ' + g.players[g.humanTurn.playerId].name + ' 行动…';
+      }
     } else hint = '等待其他城主行动……';
     el.hint.textContent = hint;
   }
 
   function renderHand(g) {
-    var p = g.players[g.humanId];
-    if (!p) return;
-
+    var duo = g.humanIds.length > 1;
     var ht = g.humanTurn;
-    var canBuild = !!(ht && ht.actionDone && ht.buildsLeft > 0);
+    var active = ht ? g.players[ht.playerId] : null;
+    var viewed = g.players[duo ? UI.viewId : g.humanId];
+    if (!viewed) return;
 
-    el.goldChip.innerHTML = COIN + '<span>' + p.gold + '</span>';
-    if (p.role) {
-      var def = E.charDef(p.role);
-      var dead = g.killed === p.role;
+    var canBuild = !!(ht && ht.actionDone && ht.buildsLeft > 0);
+    var goldP = active || viewed;
+    el.goldChip.innerHTML = COIN + '<span>' + goldP.gold + '</span>';
+    if (el.handTitle) el.handTitle.textContent = duo ? (active ? active.name + ' 的手牌' : '手牌已隐藏') : '手牌';
+
+    var rp = duo ? (active || viewed) : viewed;
+    var roleVisible = duo ? !!(rp.role && rp.roleRevealed) : !!rp.role;
+    if (roleVisible) {
+      var def = E.charDef(rp.role);
+      var dead = !duo && g.killed === rp.role;
       el.roleChip.className = 'role-chip' + (dead ? ' is-killed' : '');
       el.roleChip.innerHTML = CIT.ICONS[def.key] + '<span>' + def.name + '</span>' +
         (dead ? '<i class="dead-ico">' + CIT.ICONS.assassin + '</i>' : '');
     } else {
       el.roleChip.className = 'role-chip';
-      el.roleChip.innerHTML = '<span>待选角</span>';
+      el.roleChip.innerHTML = '<span>' + (duo ? '角色隐藏' : '待选角') + '</span>';
     }
 
+    if (duo && !active) {
+      var counts = g.humanIds.map(function (id) {
+        return '<span>' + esc(g.players[id].name) + ' · ' + g.players[id].hand.length + ' 张</span>';
+      }).join('');
+      el.hand.innerHTML = '<div class="hand-locked">' + counts +
+        '<em>轮到持机玩家时才会显示手牌</em></div>';
+      return;
+    }
+
+    var p = duo ? active : viewed;
     var cards = p.hand.slice().sort(function (a, b) { return a.cost - b.cost || a.name.localeCompare(b.name); });
     if (!cards.length) {
       el.hand.innerHTML = '<div class="hand-empty">暂无手牌</div>';
@@ -467,12 +631,15 @@
     }
 
     if (g.pending && g.pending.type === 'draft') {
-      el.actionbar.innerHTML = '<div class="wait-row"><span class="pulse-dot"></span>正在秘密选择角色…</div>';
+      var dwait = g.humanIds.length > 1 && g.pending
+        ? '等待 ' + g.players[g.pending.playerId].name + ' 选角…'
+        : '正在秘密选择角色…';
+      el.actionbar.innerHTML = '<div class="wait-row"><span class="pulse-dot"></span>' + dwait + '</div>';
       return;
     }
 
     if (!g.humanTurn) {
-      var me = g.players[g.humanId];
+      var me = g.humanIds.length === 1 ? g.players[g.humanId] : null;
       if (g.phase === 'play' && me && me.role && me.role === g.killed) {
         el.actionbar.innerHTML = '<div class="wait-row is-dead">' + CIT.ICONS.assassin +
           '<span>你的【' + E.charName(me.role) + '】被暗杀，本轮跳过</span></div>';
@@ -492,7 +659,7 @@
     }
 
     var ht = g.humanTurn;
-    var p = g.players[g.humanId];
+    var p = g.players[ht.playerId];
     var def = E.charDef(ht.charId);
     var top = '<div class="ab-top"><span class="role-tag">' + CIT.ICONS[def.key] + def.name + '</span>' +
       '<span class="ab-hint">' + (ht.actionDone ? '剩余建造 ' + ht.buildsLeft + ' 次' : '选择行动') + '</span></div>';
@@ -531,7 +698,7 @@
     if (act === 'results') { UI.resultsShown = false; UI.showResults(true); return; }
 
     var ht = g.humanTurn;
-    var p = g.players[g.humanId];
+    var p = ht ? g.players[ht.playerId] : E.humanPlayer(g);
 
     if (act === 'gold') {
       if (!ht) return;
@@ -549,7 +716,11 @@
     if (act === 'power') { UI.openPower(); return; }
     if (act === 'end') {
       if (!ht) return;
-      if (E.endHumanTurn(g)) { UI.render(); UI.pump(); }
+      if (E.endHumanTurn(g)) {
+        UI.unlockedKey = null;
+        UI.render();
+        UI.pump();
+      }
       return;
     }
     if (act === 'lab') { UI.showLabPicker(); return; }
@@ -565,7 +736,6 @@
   UI.onHandCard = function (uid) {
     var g = UI.g;
     if (!g) return;
-    var p = g.players[g.humanId];
     var ht = g.humanTurn;
     if (ht && !ht.actionDone) {
       UI.toastMsg('请先执行行动：拿金币或抽卡');
@@ -619,9 +789,13 @@
       '<div class="char-grid">' + options.map(function (id) { return charCardHTML(id); }).join('') + '</div>' +
       '<div class="char-note" id="char-note">点击角色查看能力。选中的角色只有你自己知道。</div>';
 
+    var duo = g.humanIds.length > 1;
+    var picker = g.players[g.pending.playerId];
+
     UI.openSheet({
-      title: '秘密选择角色',
-      sub: '可用 ' + options.length + ' 位 · 排除 3 位。点选后其余角色会传给下一位城主。',
+      title: duo ? picker.name + ' · 秘密选角' : '秘密选择角色',
+      sub: '可用 ' + options.length + ' 位 · 排除 3 位。点选后其余角色会传给下一位城主。' +
+        (duo ? '请确认只有 ' + picker.name + ' 在看屏幕。' : ''),
       body: body,
       footer: '<button class="btn primary" id="draft-confirm" disabled>确认选择</button>',
       onMount: function (root) {
@@ -641,6 +815,7 @@
         confirm.addEventListener('click', function () {
           if (sel == null) return;
           if (!E.pickCharacter(g, sel)) return;
+          UI.unlockedKey = null;
           UI.closeSheet(false);
           UI.render();
           UI.pump();
@@ -764,7 +939,7 @@
   }
 
   function magicianPicker(g, ht) {
-    var p = g.players[g.humanId];
+    var p = E.humanPlayer(g);
     var others = g.players.filter(function (o) { return o.id !== p.id; });
     var body = '<div class="group-label"><span>交换全部手牌</span><span>对方手牌数公开</span></div>' +
       '<div class="pick-list">' + others.map(function (o) {
@@ -838,7 +1013,7 @@
   }
 
   function warlordPicker(g, ht) {
-    var p = g.players[g.humanId];
+    var p = E.humanPlayer(g);
     var targets = E.humanWarlordTargets(g).filter(function (t) { return t.ownerId !== p.id; });
     if (!targets.length) {
       UI.toastMsg('没有可以摧毁的地区');
@@ -899,7 +1074,7 @@
 
   UI.showLabPicker = function () {
     var g = UI.g;
-    var p = g.players[g.humanId];
+    var p = E.humanPlayer(g);
     if (!p || !p.hand.length) { UI.toastMsg('没有手牌可弃'); return; }
     var body = '<div class="hand-picks">' + p.hand.map(function (c) {
       return cardHTML(c, { uid: false, attr: 'data-lab="' + c.uid + '"' });
@@ -929,7 +1104,7 @@
 
   UI.showBuildConfirm = function (uid) {
     var g = UI.g;
-    var p = g.players[g.humanId];
+    var p = E.humanPlayer(g);
     var card = null;
     p.hand.forEach(function (c) { if (c.uid === uid) card = c; });
     if (!card) return;
@@ -1033,11 +1208,12 @@
     if (g.results && g.results.length && UI.sheetOpen && !force) return;
     UI.resultsShown = true;
 
+    var duo = g.humanIds.length > 1;
     var rows = g.results.map(function (r, i) {
       return '<div class="score-row' + (r.winner ? ' win' : '') + '">' +
         '<div class="score-rank">' + (r.winner ? '♛' : (i + 1)) + '</div>' +
-        '<div class="score-main"><div class="score-name' + (r.isHuman ? ' you' : '') + '">' +
-        esc(r.name) + (r.isHuman ? '（你）' : '') + '</div>' +
+        '<div class="score-main"><div class="score-name' + (r.isHuman && !duo ? ' you' : '') + '">' +
+        esc(r.name) + (r.isHuman && !duo ? '（你）' : '') + '</div>' +
         '<div class="score-sub">' + r.districts + ' 座地区 · 基础 ' + r.base +
         ' + 五色 ' + r.colorBonus + ' + 八座 ' + r.firstBonus + '</div></div>' +
         '<div class="score-total">' + r.total + '</div></div>';
@@ -1045,7 +1221,7 @@
 
     UI.openSheet({
       title: '王城结算',
-      sub: g.results[0].winner && g.results[0].isHuman ? '你的王城赢得了本局荣耀。' : '得分最高的城主获得胜利。',
+      sub: (!duo && g.results[0].winner && g.results[0].isHuman) ? '你的王城赢得了本局荣耀。' : '得分最高的城主获得胜利。',
       body: rows + '<p class="muted-note">计分规则：全部地区造价之和；集齐五色 +3；首位建成 8 座 +4，其余达成 8 座 +2。同分并列。</p>',
       footer: '<button class="btn ghost" id="res-home">回到首页</button>' +
         '<button class="btn primary" id="res-again" style="flex:2 1 0">再来一局</button>',
@@ -1105,7 +1281,7 @@
       sub: '复刻经典桌游《富饶之城》，对阵 2–3 位 AI 城主。',
       body: '<div class="group-label"><span>基本流程</span></div>' + items +
         '<div class="group-label"><span>八位角色</span></div>' + roles +
-        '<p class="muted-note">特殊地区卡的额外效果会在卡牌详情中说明。鬼城计分时可视为任意颜色；魔法学院计算收入时可视为任意颜色。墓地会自动触发（付 1 金币取回被摧毁的地区）。<br><br>暗杀与行窃目标会显示在棋盘上方状态条；被暗杀者的身份在本轮结束时揭晓。被暗杀时你的角色标签与行动栏会变红。<br><br>本作为单人对战 AI 的复刻版：3 人桌同样以 8 座地区结束；官方 2 人双角色模式未包含。</p>',
+        '<p class="muted-note">特殊地区卡的额外效果会在卡牌详情中说明。鬼城计分时可视为任意颜色；魔法学院计算收入时可视为任意颜色。墓地会自动触发（付 1 金币取回被摧毁的地区）。<br><br>暗杀与行窃目标会显示在棋盘上方状态条；被暗杀者的身份在本轮结束时揭晓。被暗杀时你的角色标签与行动栏会变红。<br><br>双人同屏：每回合两位玩家各自秘密选角；轮到谁行动时把手机交给谁。未到回合的一方手牌、未公开角色会被隐藏，但仍建议另一位玩家自觉不看屏幕。<br><br>本作为单人对战 AI 的复刻版：3 人桌同样以 8 座地区结束；官方 2 人双角色模式未包含。</p>',
       footer: '<button class="btn ghost" id="help-close">关闭</button>',
       dismissible: true,
       onMount: function (root) {

@@ -29,7 +29,19 @@
   };
 
   E.humanPlayer = function (g) {
+    var a = E.activeHuman(g);
+    if (a) return a;
     return g.humanId >= 0 ? g.players[g.humanId] : null;
+  };
+
+  E.activeHuman = function (g) {
+    if (g.activeHumanId == null || g.activeHumanId < 0) return null;
+    return g.players[g.activeHumanId];
+  };
+
+  /* 单人模式叫“你”，多人同屏用玩家名 */
+  E.who = function (g, p) {
+    return (p.isHuman && g.humanIds && g.humanIds.length === 1) ? '你' : p.name;
   };
 
   E.playerById = function (g, id) {
@@ -111,7 +123,7 @@
     if (idx >= 0) p.hand.splice(idx, 1);
     card.builtRound = g.round;
     p.city.push(card);
-    E.log(g, (p.isHuman ? '你' : p.name) + ' 建造了【' + card.name + '】(-' + card.cost + ' 金币)',
+    E.log(g, E.who(g, p) + ' 建造了【' + card.name + '】(-' + card.cost + ' 金币)',
       p.isHuman ? 'you' : '');
     checkWinTrigger(g, p);
     return true;
@@ -150,13 +162,17 @@
     var rng = opts.rng || Math.random;
     var count = Math.max(3, Math.min(4, opts.playerCount || 4));
     var humanIndex = opts.humanIndex === undefined ? 0 : opts.humanIndex;
-    var allNames = ['你', '灰烬伯爵', '银月女爵', '锈剑骑士'];
+    var humanIds;
+    if (opts.humanIds) humanIds = opts.humanIds.slice(0);
+    else if (humanIndex === -1) humanIds = [];
+    else humanIds = [humanIndex];
+    var allNames = opts.names || ['你', '灰烬伯爵', '银月女爵', '锈剑骑士'];
     var players = [];
     for (var i = 0; i < count; i++) {
       players.push({
         id: i,
-        name: allNames[i],
-        isHuman: i === humanIndex,
+        name: allNames[i] || allNames[0],
+        isHuman: humanIds.indexOf(i) >= 0,
         gold: 2,
         hand: [],
         city: [],
@@ -199,7 +215,9 @@
       phase: 'setup',
       pending: null,
       humanTurn: null,
-      humanId: humanIndex,
+      humanId: humanIds.length ? humanIds[0] : -1,
+      humanIds: humanIds,
+      activeHumanId: -1,
       log: [],
       lastEvent: null,
       lastReveal: null,
@@ -240,6 +258,7 @@
     g.holders = {};
     g.pending = null;
     g.humanTurn = null;
+    g.activeHumanId = -1;
     g.playPtr = 1;
     g.lastReveal = null;
 
@@ -284,7 +303,7 @@
     var p = g.players[pid];
 
     if (p.isHuman) {
-      g.pending = { type: 'draft', options: g.pool.slice(0) };
+      g.pending = { type: 'draft', playerId: pid, options: g.pool.slice(0) };
       return 'pending';
     }
 
@@ -300,8 +319,9 @@
 
   E.pickCharacter = function (g, charId) {
     if (!g.pending || g.pending.type !== 'draft') return false;
-    var pid = g.draftOrder[g.draftPtr];
-    if (pid === undefined) return false;
+    var pid = g.pending.playerId;
+    if (pid === undefined) pid = g.draftOrder[g.draftPtr];
+    if (g.draftOrder[g.draftPtr] !== pid) return false;
     var p = g.players[pid];
     if (!p || !p.isHuman) return false;
     var idx = g.pool.indexOf(charId);
@@ -311,7 +331,7 @@
     p.role = charId;
     g.pending = null;
     g.draftPtr++;
-    E.log(g, '你选定了【' + E.charName(charId) + '】', 'you');
+    E.log(g, E.who(g, p) + ' 选定了角色', 'you');
     return true;
   };
 
@@ -358,7 +378,9 @@
   }
 
   function startHumanTurn(g, p, cid) {
+    g.activeHumanId = p.id;
     g.humanTurn = {
+      playerId: p.id,
       charId: cid,
       actionDone: false,
       architectDone: false,
@@ -369,7 +391,8 @@
       smithyUsed: false,
       drawn: null
     };
-    E.log(g, '轮到你行动 · 【' + E.charName(cid) + '】', 'you');
+    E.log(g, (g.humanIds.length === 1 ? '轮到你行动' : '轮到 ' + p.name + ' 行动') +
+      ' · 【' + E.charName(cid) + '】', 'you');
   }
 
   function stepPlay(g) {
@@ -431,7 +454,7 @@
     if (!p || !ht || ht.actionDone) return false;
     p.gold += 2;
     ht.actionDone = true;
-    E.log(g, '你拿取 2 枚金币', 'you');
+    E.log(g, E.who(g, p) + ' 拿取 2 枚金币', 'you');
     afterAction(g, p, ht);
     return true;
   };
@@ -460,13 +483,15 @@
 
     if (keep >= cards.length) {
       p.hand.push.apply(p.hand, cards);
-      E.log(g, '你抽到 ' + cards.map(function (c) { return '【' + c.name + '】'; }).join(''), 'you');
+      E.log(g, g.humanIds.length === 1
+        ? E.who(g, p) + ' 抽到 ' + cards.map(function (c) { return '【' + c.name + '】'; }).join('')
+        : E.who(g, p) + ' 抽到 ' + cards.length + ' 张地区卡', 'you');
       afterAction(g, p, ht);
       return { cards: [], keep: 0, auto: true };
     }
 
     ht.drawn = { cards: cards, keep: keep };
-    E.log(g, '你抽取 ' + cards.length + ' 张地区卡，需保留 ' + keep + ' 张', 'you');
+    E.log(g, E.who(g, p) + ' 抽取 ' + cards.length + ' 张地区卡，需保留 ' + keep + ' 张', 'you');
     return { cards: cards.slice(0), keep: keep };
   };
 
@@ -485,7 +510,9 @@
     if (kept.length !== keep) return false;
     p.hand.push.apply(p.hand, kept);
     E.putBottom(g, rest);
-    E.log(g, '你保留了 ' + kept.map(function (c) { return '【' + c.name + '】'; }).join(''), 'you');
+    E.log(g, g.humanIds.length === 1
+      ? E.who(g, p) + ' 保留了 ' + kept.map(function (c) { return '【' + c.name + '】'; }).join('')
+      : E.who(g, p) + ' 保留了 ' + kept.length + ' 张地区卡', 'you');
     ht.drawn = null;
     afterAction(g, p, ht);
     return true;
@@ -497,7 +524,9 @@
       var extra = E.drawTop(g, 2);
       p.hand.push.apply(p.hand, extra);
       if (extra.length) {
-        E.log(g, '建筑师额外抽到 ' + extra.map(function (c) { return '【' + c.name + '】'; }).join(''), 'you');
+        E.log(g, g.humanIds.length === 1
+          ? '建筑师额外抽到 ' + extra.map(function (c) { return '【' + c.name + '】'; }).join('')
+          : '建筑师额外抽到 ' + extra.length + ' 张地区卡', 'you');
       }
     }
   }
@@ -525,7 +554,7 @@
     if (target === 1 || g.holders[target] === p.id) return false;
     g.killed = target;
     ht.powerUsed = true;
-    E.log(g, '你暗杀了【' + E.charName(target) + '】', 'danger',
+    E.log(g, E.who(g, p) + ' 暗杀了【' + E.charName(target) + '】', 'danger',
       { type: 'assassinate', charId: target, byPlayer: p.id });
     return true;
   };
@@ -537,7 +566,7 @@
     if (target === 1 || target === g.killed || g.holders[target] === p.id) return false;
     g.thiefTarget = target;
     ht.powerUsed = true;
-    E.log(g, '你盯上了【' + E.charName(target) + '】的钱袋', 'danger',
+    E.log(g, E.who(g, p) + ' 盯上了【' + E.charName(target) + '】的钱袋', 'danger',
       { type: 'thiefAnnounce', charId: target, byPlayer: p.id });
     return true;
   };
@@ -553,7 +582,7 @@
     p.hand = other.hand;
     other.hand = tmp;
     ht.powerUsed = true;
-    E.log(g, '你与 ' + other.name + ' 交换了全部手牌（' + p.hand.length + ' 张 / ' + other.hand.length + ' 张）', 'you');
+    E.log(g, E.who(g, p) + ' 与 ' + other.name + ' 交换了全部手牌（' + p.hand.length + ' 张 / ' + other.hand.length + ' 张）', 'you');
     return true;
   };
 
@@ -573,7 +602,7 @@
     var drawn = E.drawTop(g, chosen.length);
     p.hand.push.apply(p.hand, drawn);
     ht.powerUsed = true;
-    E.log(g, '你弃掉 ' + chosen.length + ' 张地区卡并重新抽牌', 'you');
+    E.log(g, E.who(g, p) + ' 弃掉 ' + chosen.length + ' 张地区卡并重新抽牌', 'you');
     return true;
   };
 
@@ -609,7 +638,7 @@
     p.gold -= cost;
     ht.powerUsed = true;
     E.destroyDistrict(g, owner, d, p);
-    if (cost > 0) E.log(g, '你为此支付了 ' + cost + ' 金币', 'muted');
+    if (cost > 0) E.log(g, E.who(g, p) + ' 为此支付了 ' + cost + ' 金币', 'muted');
     return { ok: true };
   };
 
@@ -624,7 +653,9 @@
     E.putBottom(g, [card]);
     p.gold += 1;
     ht.labUsed = true;
-    E.log(g, '实验室：弃掉【' + card.name + '】，获得 1 金币', 'you');
+    E.log(g, g.humanIds.length === 1
+      ? '实验室：' + E.who(g, p) + ' 弃掉【' + card.name + '】，获得 1 金币'
+      : '实验室：' + E.who(g, p) + ' 弃 1 张手牌，获得 1 金币', 'you');
     return { ok: true };
   };
 
@@ -637,7 +668,9 @@
     var cards = E.drawTop(g, 3);
     p.hand.push.apply(p.hand, cards);
     ht.smithyUsed = true;
-    E.log(g, '铁匠铺：支付 2 金币，抽到 ' + cards.map(function (c) { return '【' + c.name + '】'; }).join(''), 'you');
+    E.log(g, g.humanIds.length === 1
+      ? '铁匠铺：' + E.who(g, p) + ' 支付 2 金币，抽到 ' + cards.map(function (c) { return '【' + c.name + '】'; }).join('')
+      : '铁匠铺：' + E.who(g, p) + ' 支付 2 金币，抽到 ' + cards.length + ' 张地区卡', 'you');
     return { ok: true };
   };
 
@@ -646,6 +679,7 @@
     if (!ht) return false;
     if (ht.drawn) return false;
     g.humanTurn = null;
+    g.activeHumanId = -1;
     g.playPtr++;
     return true;
   };
@@ -688,6 +722,7 @@
     }
 
     g.humanTurn = null;
+    g.activeHumanId = -1;
     g.pending = null;
 
     if (g.firstTo8 != null) {
