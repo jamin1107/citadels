@@ -20,10 +20,12 @@
 
   E.charDef = function (id) { return CIT.CHARACTERS[id - 1]; };
 
-  E.log = function (g, text, kind) {
-    g.log.push({ round: g.round, text: text, kind: kind || '' });
+  E.log = function (g, text, kind, meta) {
+    var entry = { round: g.round, text: text, kind: kind || '' };
+    if (meta) entry.meta = meta;
+    g.log.push(entry);
     if (g.log.length > 160) g.log.shift();
-    g.lastEvent = { text: text, kind: kind || '' };
+    g.lastEvent = entry;
   };
 
   E.humanPlayer = function (g) {
@@ -130,7 +132,8 @@
     if (idx < 0) return false;
     owner.city.splice(idx, 1);
     g.discard.push(d);
-    E.log(g, by.name + ' 摧毁了 ' + owner.name + ' 的【' + d.name + '】', 'danger');
+    E.log(g, by.name + ' 摧毁了 ' + owner.name + ' 的【' + d.name + '】', 'danger',
+      { type: 'destroy', ownerId: owner.id, byId: by.id, cardName: d.name, cost: d.cost });
     if (E.has(owner, 'graveyard') && owner.gold >= 1) {
       owner.gold -= 1;
       owner.hand.push(d);
@@ -209,6 +212,7 @@
       revealed: {},
       playPtr: 1,
       killed: null,
+      killedSkipped: false,
       thiefTarget: null,
       thiefDone: false,
       bishopProtection: false,
@@ -228,6 +232,7 @@
     g.round++;
     g.phase = 'draft';
     g.killed = null;
+    g.killedSkipped = false;
     g.thiefTarget = null;
     g.thiefDone = false;
     g.bishopProtection = false;
@@ -334,16 +339,22 @@
     }
   }
 
-  function performSteal(g, targetPid) {
+  function performSteal(g, targetPid, charId) {
     var thiefPid = g.holders[2];
     var victim = g.players[targetPid];
     g.thiefDone = true;
     if (thiefPid == null) return;
     var thief = g.players[thiefPid];
     var amount = victim.gold;
+    if (amount <= 0) {
+      E.log(g, '盗贼扑了个空：' + victim.name + ' 身上没有金币', 'muted',
+        { type: 'stealMiss', reason: 'empty', thiefId: thief.id, victimId: victim.id, charId: charId });
+      return;
+    }
     victim.gold = 0;
     thief.gold += amount;
-    E.log(g, '盗贼从 ' + victim.name + ' 处偷走了 ' + amount + ' 金币', 'danger');
+    E.log(g, '盗贼从 ' + victim.name + ' 处偷走了 ' + amount + ' 金币', 'danger',
+      { type: 'steal', amount: amount, thiefId: thief.id, victimId: victim.id, charId: charId });
   }
 
   function startHumanTurn(g, p, cid) {
@@ -369,7 +380,9 @@
       var p = g.players[pid];
 
       if (cid === g.killed) {
-        E.log(g, p.name + ' 的【' + E.charName(cid) + '】被暗杀，本轮跳过', 'danger');
+        g.killedSkipped = true;
+        E.log(g, '【' + E.charName(cid) + '】被暗杀，本轮跳过', 'danger',
+          { type: 'killedSkip', charId: cid });
         g.playPtr++;
         return 'killed';
       }
@@ -384,7 +397,7 @@
       }
 
       if (g.thiefTarget === cid && !g.thiefDone) {
-        performSteal(g, pid);
+        performSteal(g, pid, cid);
         return 'steal';
       }
 
@@ -512,7 +525,8 @@
     if (target === 1 || g.holders[target] === p.id) return false;
     g.killed = target;
     ht.powerUsed = true;
-    E.log(g, '你暗杀了【' + E.charName(target) + '】', 'danger');
+    E.log(g, '你暗杀了【' + E.charName(target) + '】', 'danger',
+      { type: 'assassinate', charId: target, byPlayer: p.id });
     return true;
   };
 
@@ -523,7 +537,8 @@
     if (target === 1 || target === g.killed || g.holders[target] === p.id) return false;
     g.thiefTarget = target;
     ht.powerUsed = true;
-    E.log(g, '你盯上了【' + E.charName(target) + '】的钱袋', 'danger');
+    E.log(g, '你盯上了【' + E.charName(target) + '】的钱袋', 'danger',
+      { type: 'thiefAnnounce', charId: target, byPlayer: p.id });
     return true;
   };
 
@@ -647,10 +662,21 @@
   E.checkWinTrigger = checkWinTrigger;
 
   function endRound(g) {
-    if (g.killed != null && g.holders[g.killed] != null && !g.revealed[g.killed]) {
-      var dead = g.players[g.holders[g.killed]];
-      dead.roleRevealed = true;
-      E.log(g, dead.name + ' 揭示被暗杀的角色【' + E.charName(g.killed) + '】', 'muted');
+    if (g.thiefTarget != null && !g.thiefDone) {
+      E.log(g, '盗贼的目标【' + E.charName(g.thiefTarget) + '】本轮未登场，行窃落空', 'muted',
+        { type: 'stealMiss', reason: 'absent', charId: g.thiefTarget });
+    }
+
+    if (g.killed != null) {
+      if (g.holders[g.killed] != null) {
+        var dead = g.players[g.holders[g.killed]];
+        dead.roleRevealed = true;
+        E.log(g, '身份揭晓：' + dead.name + ' 的【' + E.charName(g.killed) + '】被暗杀', 'danger',
+          { type: 'killReveal', playerId: dead.id, charId: g.killed });
+      } else {
+        E.log(g, '刺客的目标【' + E.charName(g.killed) + '】本轮未登场，刺杀落空', 'muted',
+          { type: 'killMiss', charId: g.killed });
+      }
     }
 
     if (g.holders[4] != null) {

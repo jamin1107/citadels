@@ -41,29 +41,64 @@
     return t.color;
   }
 
+  var ROLE_COLOR = {
+    1: '#a33f39', 2: '#3f6f74', 3: '#6f4f9c', 4: '#c9a24a',
+    5: '#3f6fa8', 6: '#4c7d5d', 7: '#9a6a3f', 8: '#8d3b33'
+  };
+
+  function roleColor(id) { return ROLE_COLOR[id] || '#c9a24a'; }
+
+  function hexA(hex, a) {
+    var h = String(hex).replace('#', '');
+    var r = parseInt(h.substr(0, 2), 16);
+    var g = parseInt(h.substr(2, 2), 16);
+    var b = parseInt(h.substr(4, 2), 16);
+    return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+  }
+
   function cardHTML(d, o) {
     o = o || {};
     var t = T[d.type] || T.special;
     var cls = 'dcard' + (o.mini ? ' mini' : '') + (o.cls ? ' ' + o.cls : '');
-    var attrs = o.uid === false ? '' : ' data-uid="' + d.uid + '" data-zone="' + (o.zone || 'hand') + '"';
-    return '<div class="' + cls + '" style="--c:' + t.color + '"' + attrs + '>' +
-      '<div class="dcard-top"><span class="cost">' + d.cost + '</span>' +
-      '<span class="dtype">' + t.name + '</span></div>' +
-      '<div class="dcard-art">' + (CIT.BUILDINGS[d.type] || '') + '</div>' +
-      '<div class="dcard-name">' + esc(d.name) + '</div>' +
+    var attrs = (o.attr ? ' ' + o.attr : '') +
+      (o.uid === false ? '' : ' data-uid="' + d.uid + '" data-zone="' + (o.zone || 'hand') + '"');
+    return '<div class="' + cls + '" style="--c:' + t.color + ';--cd:' + t.deep +
+      ';--cs:' + hexA(t.color, .2) + '"' + attrs + '>' +
+      '<div class="dc-art">' +
+      '<span class="dc-type">' + t.name + '</span>' +
+      '<span class="dc-cost">' + d.cost + '</span>' +
+      '<span class="dc-stars"></span>' +
+      '<span class="dc-horizon"></span>' +
+      (CIT.BUILDINGS[d.type] || '') +
+      '</div>' +
+      '<div class="dc-name">' + esc(d.name) + '</div>' +
       '</div>';
   }
 
   function charCardHTML(id, o) {
     o = o || {};
     var c = E.charDef(id);
+    var col = roleColor(id);
     var cls = 'char-card' + (o.disabled ? ' disabled' : '') + (o.selected ? ' selected' : '');
-    return '<button type="button" class="' + cls + '" data-char="' + id + '">' +
-      '<span class="char-rank">' + id + '</span>' +
-      '<span class="char-icon">' + CIT.ICONS[c.key] + '</span>' +
-      '<span class="char-name">' + c.name + '</span>' +
-      '<span class="char-sub">' + c.short + '</span>' +
+    return '<button type="button" class="' + cls + '" data-char="' + id +
+      '" style="--rc:' + col + ';--rcs:' + hexA(col, .34) + '">' +
+      '<span class="cc-rank">' + id + '</span>' +
+      '<span class="cc-medal">' + CIT.ICONS[c.key] + '</span>' +
+      '<span class="cc-name">' + c.name + '</span>' +
+      '<span class="cc-title">' + c.title + '</span>' +
+      '<span class="cc-power">' + c.short + '</span>' +
+      '<span class="cc-ribbon">已排除</span>' +
       '</button>';
+  }
+
+  function exCardHTML(id) {
+    var c = E.charDef(id);
+    var col = roleColor(id);
+    return '<div class="ex-card" style="--rc:' + col + ';--rcs:' + hexA(col, .3) + '">' +
+      '<span class="ex-ico">' + CIT.ICONS[c.key] + '</span>' +
+      '<span class="ex-name">' + c.name + '</span>' +
+      '<span class="ex-stamp">排除</span>' +
+      '</div>';
   }
 
   /* ---------------- 初始化 ---------------- */
@@ -75,6 +110,7 @@
     el.phase = $('hud-phase');
     el.crown = $('hud-crown');
     el.opponents = $('opponents');
+    el.status = $('statusbar');
     el.meta = $('board-meta');
     el.city = $('city');
     el.hint = $('hint-line');
@@ -82,6 +118,7 @@
     el.goldChip = $('gold-chip');
     el.hand = $('hand');
     el.actionbar = $('actionbar');
+    el.eventLayer = $('event-layer');
     el.toast = $('toast');
 
     $('btn-start').addEventListener('click', function () { UI.startGame(UI.count); });
@@ -133,6 +170,7 @@
     el.start.classList.add('hidden');
     el.toast.textContent = '';
     el.toast.classList.remove('show');
+    if (el.eventLayer) el.eventLayer.innerHTML = '';
     UI.render();
     UI.pump();
   };
@@ -159,9 +197,10 @@
     }
     if (g.humanTurn) { UI.render(); return; }
 
+    var mark = g.log.length;
     var r = E.step(g);
     UI.render();
-    UI.flash();
+    UI.flash(mark);
 
     if (g.over) { UI.showResults(true); return; }
     if (g.pending && g.pending.type === 'draft') { UI.showDraft(); return; }
@@ -175,15 +214,108 @@
     UI.timer = setTimeout(UI.pump, delay);
   };
 
-  UI.flash = function () {
+  UI.flash = function (fromIndex) {
     var g = UI.g;
     if (!g || !g.log || !g.log.length) return;
-    var last = g.log[g.log.length - 1];
-    UI.toastMsg(last.text);
+    var logs = g.log;
+    if (typeof fromIndex === 'number' && logs.length <= fromIndex) return;
+    var start = typeof fromIndex === 'number' ? fromIndex : logs.length - 1;
+    var ev = null;
+    for (var i = logs.length - 1; i >= start; i--) {
+      if (logs[i].meta) { ev = logs[i]; break; }
+    }
+    if (!ev) ev = logs[logs.length - 1];
+    var meta = ev.meta;
+    var me = g.players[g.humanId];
+
+    if (meta) {
+      var who = function (id) {
+        var p = E.playerById(g, id);
+        return p ? p.name : '某位城主';
+      };
+      if (meta.type === 'assassinate') {
+        var byMe = me && meta.byPlayer === me.id;
+        UI.showEvent(byMe ? '暗杀令已发出' : '有人发出暗杀令',
+          (byMe ? '目标：' : '目标【') + E.charName(meta.charId) + (byMe ? '' : '】'),
+          CIT.ICONS.assassin, 'danger');
+        return;
+      }
+      if (meta.type === 'thiefAnnounce') {
+        var thiefMe = me && meta.byPlayer === me.id;
+        UI.showEvent(thiefMe ? '行窃目标已锁定' : '盗贼出手了',
+          '钱袋：' + E.charName(meta.charId), CIT.ICONS.thief, 'gold');
+        return;
+      }
+      if (meta.type === 'steal') {
+        var asThief = me && meta.thiefId === me.id;
+        var asVictim = me && meta.victimId === me.id;
+        if (asThief) {
+          UI.showEvent('行窃得手', '从 ' + who(meta.victimId) + ' 处获得 ' + meta.amount + ' 金币',
+            CIT.ICONS.thief, 'gain');
+        } else if (asVictim) {
+          UI.showEvent('钱袋被偷', who(meta.thiefId) + ' 偷走了 ' + meta.amount + ' 金币',
+            CIT.ICONS.thief, 'danger');
+        } else {
+          UI.showEvent('盗贼得手', who(meta.victimId) + ' 失去 ' + meta.amount + ' 金币',
+            CIT.ICONS.thief, 'danger');
+        }
+        return;
+      }
+      if (meta.type === 'stealMiss') {
+        UI.showEvent('行窃落空',
+          meta.reason === 'absent' ? '目标角色本轮未登场' : '目标身上没有金币',
+          CIT.ICONS.thief, 'muted');
+        return;
+      }
+      if (meta.type === 'killedSkip') {
+        var killedMe = me && me.role === meta.charId;
+        UI.showEvent(killedMe ? '你被暗杀' : '暗杀生效',
+          killedMe ? '本轮跳过你的行动' : '【' + E.charName(meta.charId) + '】本轮跳过',
+          CIT.ICONS.assassin, 'danger');
+        return;
+      }
+      if (meta.type === 'killReveal') {
+        UI.showEvent('身份揭晓', who(meta.playerId) + ' 的【' + E.charName(meta.charId) + '】被暗杀',
+          CIT.ICONS.assassin, 'danger');
+        return;
+      }
+      if (meta.type === 'killMiss') {
+        UI.showEvent('刺杀落空', '目标角色本轮未登场', CIT.ICONS.assassin, 'muted');
+        return;
+      }
+      if (meta.type === 'destroy') {
+        UI.showEvent('王城被摧毁', who(meta.byId) + ' 拆毁了 ' + who(meta.ownerId) + ' 的【' + meta.cardName + '】',
+          CIT.ICONS.warlord, 'danger');
+        return;
+      }
+    }
+
+    UI.toastMsg(ev.text);
+  };
+
+  UI.showEvent = function (title, sub, icon, tone) {
+    if (!el.eventLayer) return;
+    UI.eventUntil = Date.now() + 2600;
+    el.eventLayer.innerHTML = '<div class="event-banner tone-' + (tone || 'gold') + '">' +
+      '<span class="eb-ico">' + icon + '</span>' +
+      '<span class="eb-body"><b>' + esc(title) + '</b><em>' + esc(sub) + '</em></span>' +
+      '</div>';
+    var banner = el.eventLayer.firstChild;
+    if (!banner) return;
+    void banner.offsetWidth;
+    banner.classList.add('show');
+    clearTimeout(UI.eventTimer);
+    UI.eventTimer = setTimeout(function () {
+      banner.classList.remove('show');
+      setTimeout(function () {
+        if (el.eventLayer && el.eventLayer.firstChild === banner) el.eventLayer.innerHTML = '';
+      }, 320);
+    }, 2600);
   };
 
   UI.toastMsg = function (text) {
     if (!text) return;
+    if (Date.now() < (UI.eventUntil || 0)) return;
     el.toast.textContent = text;
     el.toast.classList.add('show');
     clearTimeout(UI.toastTimer);
@@ -197,10 +329,33 @@
     if (!g) return;
     renderHud(g);
     renderOpponents(g);
+    renderStatus(g);
     renderBoard(g);
     renderHand(g);
     renderAction(g);
   };
+
+  function renderStatus(g) {
+    var chips = '';
+    if (!g.over && g.phase === 'play') {
+      var me = g.players[g.humanId];
+      if (g.killed) {
+        var mine = me && me.role === g.killed;
+        var label = mine ? '你被暗杀' : (g.killedSkipped ? '已跳过' : '暗杀目标');
+        var tail = mine ? '本轮跳过' : E.charName(g.killed);
+        chips += '<span class="st-chip st-danger' + (mine ? ' st-mine' : '') + '">' +
+          CIT.ICONS.assassin + '<b>' + label + '</b>' + tail + '</span>';
+      }
+      if (g.thiefTarget && !g.thiefDone) {
+        chips += '<span class="st-chip st-gold">' + CIT.ICONS.thief +
+          '<b>行窃目标</b>' + E.charName(g.thiefTarget) + '</span>';
+      }
+      if (g.bishopProtection) {
+        chips += '<span class="st-chip st-blue">' + CIT.ICONS.bishop + '<b>主教庇护</b></span>';
+      }
+    }
+    el.status.innerHTML = chips;
+  }
 
   function renderHud(g) {
     el.round.textContent = '第 ' + Math.max(1, g.round) + ' 回合';
@@ -227,7 +382,8 @@
       var role;
       if (p.roleRevealed && p.role) {
         var def = E.charDef(p.role);
-        role = '<div class="opp-role role-face" style="color:' + T.noble.deep + '">' +
+        var col = roleColor(p.role);
+        role = '<div class="opp-role role-face" style="--rc:' + col + ';--rcs:' + hexA(col, .32) + '">' +
           CIT.ICONS[def.key] + '<b>' + def.name + '</b></div>';
       } else {
         role = '<div class="role-back">?</div>';
@@ -281,8 +437,12 @@
     el.goldChip.innerHTML = COIN + '<span>' + p.gold + '</span>';
     if (p.role) {
       var def = E.charDef(p.role);
-      el.roleChip.innerHTML = CIT.ICONS[def.key] + '<span>' + def.name + '</span>';
+      var dead = g.killed === p.role;
+      el.roleChip.className = 'role-chip' + (dead ? ' is-killed' : '');
+      el.roleChip.innerHTML = CIT.ICONS[def.key] + '<span>' + def.name + '</span>' +
+        (dead ? '<i class="dead-ico">' + CIT.ICONS.assassin + '</i>' : '');
     } else {
+      el.roleChip.className = 'role-chip';
       el.roleChip.innerHTML = '<span>待选角</span>';
     }
 
@@ -312,6 +472,12 @@
     }
 
     if (!g.humanTurn) {
+      var me = g.players[g.humanId];
+      if (g.phase === 'play' && me && me.role && me.role === g.killed) {
+        el.actionbar.innerHTML = '<div class="wait-row is-dead">' + CIT.ICONS.assassin +
+          '<span>你的【' + E.charName(me.role) + '】被暗杀，本轮跳过</span></div>';
+        return;
+      }
       var wait = '等待其他城主行动…';
       if (g.phase === 'play') {
         var holder = g.holders[g.playPtr];
@@ -444,15 +610,18 @@
     var options = g.pending.options.slice().sort(function (a, b) { return a - b; });
     var excluded = g.excludedKnown.slice();
 
-    var body = '<div class="excluded-row"><span class="tag">公开排除</span>' +
-      excluded.map(function (id) { return '<span class="tag">' + E.charName(id) + '</span>'; }).join('') +
-      '<span class="tag back">1 张未知</span></div>' +
+    var body = '<div class="ex-block">' +
+      '<div class="ex-head"><span>本回合排除的角色</span><em>这 3 位不会登场</em></div>' +
+      '<div class="ex-row">' +
+      '<div class="ex-card ex-back"><span class="ex-q">?</span><span class="ex-name">未知</span></div>' +
+      excluded.map(function (id) { return exCardHTML(id); }).join('') +
+      '</div></div>' +
       '<div class="char-grid">' + options.map(function (id) { return charCardHTML(id); }).join('') + '</div>' +
       '<div class="char-note" id="char-note">点击角色查看能力。选中的角色只有你自己知道。</div>';
 
     UI.openSheet({
       title: '秘密选择角色',
-      sub: '当前可用 ' + options.length + ' 位角色，选择后其余角色会传给下一位城主。',
+      sub: '可用 ' + options.length + ' 位 · 排除 3 位。点选后其余角色会传给下一位城主。',
       body: body,
       footer: '<button class="btn primary" id="draft-confirm" disabled>确认选择</button>',
       onMount: function (root) {
@@ -485,7 +654,7 @@
   UI.showDrawPick = function (cards, keep) {
     var picked = [];
     var body = '<div class="hand-picks" id="draw-picks">' +
-      cards.map(function (c) { return cardHTML(c, { uid: false, cls: '' }).replace('<div class="dcard"', '<div class="dcard" data-draw="' + c.uid + '"'); }).join('') +
+      cards.map(function (c) { return cardHTML(c, { uid: false, cls: '', attr: 'data-draw="' + c.uid + '"' }); }).join('') +
       '</div><p class="muted-note">从抽到的 ' + cards.length + ' 张中保留 ' + keep + ' 张，其余放回牌堆底部。</p>';
 
     UI.openSheet({
@@ -606,7 +775,7 @@
       }).join('') + '</div>' +
       '<div class="group-label"><span>弃牌重抽</span><span>可多选</span></div>' +
       '<div class="hand-picks">' + p.hand.map(function (c) {
-        return cardHTML(c, { uid: false }).replace('<div class="dcard"', '<div class="dcard" data-mag="' + c.uid + '"');
+        return cardHTML(c, { uid: false, attr: 'data-mag="' + c.uid + '"' });
       }).join('') + '</div>' +
       '<p class="muted-note">选择一名玩家交换整手牌；或选择若干手牌弃掉，再抽等量的新牌。点空白处关闭 = 放弃能力。</p>';
 
@@ -733,7 +902,7 @@
     var p = g.players[g.humanId];
     if (!p || !p.hand.length) { UI.toastMsg('没有手牌可弃'); return; }
     var body = '<div class="hand-picks">' + p.hand.map(function (c) {
-      return cardHTML(c, { uid: false }).replace('<div class="dcard"', '<div class="dcard" data-lab="' + c.uid + '"');
+      return cardHTML(c, { uid: false, attr: 'data-lab="' + c.uid + '"' });
     }).join('') + '</div><p class="muted-note">丢弃 1 张手牌，获得 1 金币。每回合一次。</p>';
 
     UI.openSheet({
@@ -936,7 +1105,7 @@
       sub: '复刻经典桌游《富饶之城》，对阵 2–3 位 AI 城主。',
       body: '<div class="group-label"><span>基本流程</span></div>' + items +
         '<div class="group-label"><span>八位角色</span></div>' + roles +
-        '<p class="muted-note">特殊地区卡的额外效果会在卡牌详情中说明。鬼城计分时可视为任意颜色；魔法学院计算收入时可视为任意颜色。墓地会自动触发（付 1 金币取回被摧毁的地区）。<br><br>本作为单人对战 AI 的复刻版：3 人桌同样以 8 座地区结束；官方 2 人双角色模式未包含。</p>',
+        '<p class="muted-note">特殊地区卡的额外效果会在卡牌详情中说明。鬼城计分时可视为任意颜色；魔法学院计算收入时可视为任意颜色。墓地会自动触发（付 1 金币取回被摧毁的地区）。<br><br>暗杀与行窃目标会显示在棋盘上方状态条；被暗杀者的身份在本轮结束时揭晓。被暗杀时你的角色标签与行动栏会变红。<br><br>本作为单人对战 AI 的复刻版：3 人桌同样以 8 座地区结束；官方 2 人双角色模式未包含。</p>',
       footer: '<button class="btn ghost" id="help-close">关闭</button>',
       dismissible: true,
       onMount: function (root) {

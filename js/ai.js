@@ -184,7 +184,8 @@
     }
     if (best != null) {
       g.killed = best;
-      E.log(g, p.name + ' 宣布暗杀【' + E.charName(best) + '】', 'danger');
+      E.log(g, p.name + ' 宣布暗杀【' + E.charName(best) + '】', 'danger',
+        { type: 'assassinate', charId: best, byPlayer: p.id });
     }
   }
 
@@ -206,7 +207,8 @@
     }
     if (best != null) {
       g.thiefTarget = best;
-      E.log(g, p.name + ' 宣布盯上【' + E.charName(best) + '】的钱袋', 'danger');
+      E.log(g, p.name + ' 宣布盯上【' + E.charName(best) + '】的钱袋', 'danger',
+        { type: 'thiefAnnounce', charId: best, byPlayer: p.id });
     }
   }
 
