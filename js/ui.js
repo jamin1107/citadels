@@ -23,7 +23,8 @@
     sheetOpen: false,
     sheetDismissible: false,
     resultsShown: false,
-    selectedUid: null
+    selectedUid: null,
+    netBusy: 0
   };
   CIT.UI = UI;
 
@@ -131,7 +132,10 @@
     el.pass = $('pass');
     el.modeNote = $('mode-note');
 
-    $('btn-start').addEventListener('click', function () { UI.startGame(UI.count, UI.mode); });
+    $('btn-start').addEventListener('click', function () {
+      if (UI.mode === 'net') { CIT.Net.openLobby(UI.count); return; }
+      UI.startGame(UI.count, UI.mode);
+    });
     $('btn-rules').addEventListener('click', function () { UI.showHelp(); });
 
     var modeSeg = $('mode-seg');
@@ -185,11 +189,16 @@
     });
 
     UI.updateModeNote();
+    if (CIT.Net) CIT.Net.handleHash();
   };
 
   UI.updateModeNote = function () {
     if (!el.modeNote) return;
-    if (UI.mode === 'duo') {
+    var btn = $('btn-start');
+    if (btn) btn.textContent = UI.mode === 'net' ? '进入局域网联机' : '开始游戏';
+    if (UI.mode === 'net') {
+      el.modeNote.textContent = '同一 WiFi：房主出示邀请码 → 客人扫码生成应答码 → 房主再扫应答码即连接 · AI 补位';
+    } else if (UI.mode === 'duo') {
       el.modeNote.textContent = '2 位玩家轮流持机 + ' + (UI.count - 2) + ' 位 AI 城主 · 手牌与未公开角色会隐藏';
     } else {
       el.modeNote.textContent = '你 + ' + (UI.count - 1) + ' 位 AI 城主';
@@ -201,6 +210,9 @@
   UI.startGame = function (count, mode) {
     UI.mode = mode || UI.mode || 'solo';
     UI.count = count;
+    UI.restoreNetShims();
+    UI.net = null;
+    UI.netBusy = 0;
     var duo = UI.mode === 'duo';
     var names = duo
       ? ['玩家 1', '玩家 2', '灰烬伯爵', '银月女爵']
@@ -228,6 +240,9 @@
 
   UI.backHome = function () {
     UI.closeSheet(false);
+    UI.restoreNetShims();
+    UI.net = null;
+    UI.netBusy = 0;
     UI.g = null;
     UI.pass = null;
     UI.unlockedKey = null;
@@ -280,12 +295,18 @@
     clearTimeout(UI.timer);
     var g = UI.g;
     if (!g) return;
+    if (UI.net && UI.net.role === 'guest') {
+      UI.render();
+      UI.netGuestCheck();
+      return;
+    }
     if (UI.pass || UI.sheetOpen) return;
     if (g.over) { UI.render(); UI.showResults(true); return; }
 
     if (g.pending && g.pending.type === 'draft') {
       UI.syncView(g);
       UI.render();
+      if (UI.mode === 'net' && UI.net && g.pending.playerId !== UI.net.seat) return;
       var dkey = 'draft:' + g.pending.playerId + ':' + g.round;
       if (UI.mode === 'duo' && UI.unlockedKey !== dkey) {
         UI.showPass(g, 'draft', g.pending.playerId, dkey);
@@ -298,6 +319,7 @@
     if (g.humanTurn) {
       UI.syncView(g);
       UI.render();
+      if (UI.mode === 'net' && UI.net && g.humanTurn.playerId !== UI.net.seat) return;
       var tkey = 'turn:' + g.humanTurn.playerId + ':' + g.round + ':' + g.humanTurn.charId;
       if (UI.mode === 'duo' && UI.unlockedKey !== tkey) {
         UI.showPass(g, 'turn', g.humanTurn.playerId, tkey);
@@ -455,12 +477,15 @@
     renderBoard(g);
     renderHand(g);
     renderAction(g);
+    if (UI.net && UI.net.role === 'host' && CIT.Net) CIT.Net.sync();
   };
 
   function renderStatus(g) {
     var chips = '';
     if (!g.over && g.phase === 'play') {
-      var me = g.humanIds.length === 1 ? g.players[g.humanId] : null;
+      var net = UI.mode === 'net' && UI.net;
+      var me = net ? g.players[UI.net.seat]
+        : (g.humanIds.length === 1 ? g.players[g.humanId] : null);
       if (g.killed) {
         var mine = me && me.role === g.killed;
         var label = mine ? '你被暗杀' : (g.killedSkipped ? '已跳过' : '暗杀目标');
@@ -500,7 +525,8 @@
 
   function renderOpponents(g) {
     var html = '';
-    var viewPid = g.humanIds.length > 1 ? UI.viewId : g.humanId;
+    var net = UI.mode === 'net' && UI.net;
+    var viewPid = net ? UI.net.seat : (g.humanIds.length > 1 ? UI.viewId : g.humanId);
     g.players.forEach(function (p) {
       if (p.id === viewPid) return;
       var cur = g.phase === 'play' && !g.over && g.holders[g.playPtr] === p.id;
@@ -530,15 +556,20 @@
   }
 
   function renderBoard(g) {
+    var net = UI.mode === 'net' && UI.net;
     var duo = g.humanIds.length > 1;
-    var p = g.players[duo ? UI.viewId : g.humanId];
+    var p = g.players[net ? UI.net.seat : (duo ? UI.viewId : g.humanId)];
     if (!p) return;
     var base = 0;
     p.city.forEach(function (d) { base += (d.value || d.cost); });
     el.meta.textContent = p.city.length + ' / 8 座 · ' + base + ' 分' + (duo ? ' · ' + p.gold + ' 金币' : '');
 
     if (el.title && el.viewTabs) {
-      if (duo) {
+      if (net) {
+        el.title.classList.remove('hidden');
+        el.viewTabs.classList.add('hidden');
+        el.viewTabs.innerHTML = '';
+      } else if (duo) {
         el.title.classList.add('hidden');
         el.viewTabs.classList.remove('hidden');
         el.viewTabs.innerHTML = g.humanIds.map(function (id) {
@@ -560,11 +591,26 @@
     var hint = '';
     if (g.over) hint = '对局结束，点击「查看结算」查看本局得分。';
     else if (g.phase === 'draft') {
-      hint = g.humanIds.length > 1 && g.pending
-        ? '正在由 ' + g.players[g.pending.playerId].name + ' 秘密选角…'
-        : '从剩余角色中秘密选择一位，其余角色会被后续城主取走。';
+      if (net) {
+        hint = g.pending
+          ? (g.pending.playerId === UI.net.seat ? '从剩余角色中秘密选择一位。'
+            : '正在由 ' + g.players[g.pending.playerId].name + ' 秘密选角…')
+          : '等待其他玩家选角…';
+      } else if (duo && g.pending) {
+        hint = '正在由 ' + g.players[g.pending.playerId].name + ' 秘密选角…';
+      } else {
+        hint = '从剩余角色中秘密选择一位，其余角色会被后续城主取走。';
+      }
     } else if (g.humanTurn) {
-      if (!duo || g.humanTurn.playerId === p.id) {
+      if (net) {
+        if (g.humanTurn.playerId === UI.net.seat) {
+          if (!g.humanTurn.actionDone) hint = '先执行行动：拿 2 金币，或抽 2 张保留 1 张。';
+          else if (g.humanTurn.buildsLeft > 0) hint = '点击下方手牌即可建造，本回合还可建造 ' + g.humanTurn.buildsLeft + ' 座。';
+          else hint = '本回合建造次数已用完。你仍可使用角色能力，然后结束回合。';
+        } else {
+          hint = '正在等待 ' + g.players[g.humanTurn.playerId].name + ' 行动…';
+        }
+      } else if (!duo || g.humanTurn.playerId === p.id) {
         if (!g.humanTurn.actionDone) hint = '先执行行动：拿 2 金币，或抽 2 张保留 1 张。';
         else if (g.humanTurn.buildsLeft > 0) hint = '点击下方手牌即可建造，本回合还可建造 ' + g.humanTurn.buildsLeft + ' 座。';
         else hint = '本回合建造次数已用完。你仍可使用角色能力，然后结束回合。';
@@ -576,31 +622,36 @@
   }
 
   function renderHand(g) {
+    var net = UI.mode === 'net' && UI.net;
     var duo = g.humanIds.length > 1;
     var ht = g.humanTurn;
     var active = ht ? g.players[ht.playerId] : null;
-    var viewed = g.players[duo ? UI.viewId : g.humanId];
+    var viewed = g.players[net ? UI.net.seat : (duo ? UI.viewId : g.humanId)];
     if (!viewed) return;
 
-    var canBuild = !!(ht && ht.actionDone && ht.buildsLeft > 0);
-    var goldP = active || viewed;
+    var mineTurn = net ? !!(ht && ht.playerId === UI.net.seat) : true;
+    var canBuild = !!(ht && mineTurn && ht.actionDone && ht.buildsLeft > 0);
+    var goldP = net ? viewed : (active || viewed);
     el.goldChip.innerHTML = COIN + '<span>' + goldP.gold + '</span>';
-    if (el.handTitle) el.handTitle.textContent = duo ? (active ? active.name + ' 的手牌' : '手牌已隐藏') : '手牌';
+    if (el.handTitle) {
+      el.handTitle.textContent = net ? '手牌'
+        : (duo ? (active ? active.name + ' 的手牌' : '手牌已隐藏') : '手牌');
+    }
 
-    var rp = duo ? (active || viewed) : viewed;
-    var roleVisible = duo ? !!(rp.role && rp.roleRevealed) : !!rp.role;
+    var rp = net ? viewed : (duo ? (active || viewed) : viewed);
+    var roleVisible = net ? !!rp.role : (duo ? !!(rp.role && rp.roleRevealed) : !!rp.role);
     if (roleVisible) {
       var def = E.charDef(rp.role);
-      var dead = !duo && g.killed === rp.role;
+      var dead = g.killed === rp.role && (net || !duo);
       el.roleChip.className = 'role-chip' + (dead ? ' is-killed' : '');
       el.roleChip.innerHTML = CIT.ICONS[def.key] + '<span>' + def.name + '</span>' +
         (dead ? '<i class="dead-ico">' + CIT.ICONS.assassin + '</i>' : '');
     } else {
       el.roleChip.className = 'role-chip';
-      el.roleChip.innerHTML = '<span>' + (duo ? '角色隐藏' : '待选角') + '</span>';
+      el.roleChip.innerHTML = '<span>' + (duo && !net ? '角色隐藏' : '待选角') + '</span>';
     }
 
-    if (duo && !active) {
+    if (duo && !net && !active) {
       var counts = g.humanIds.map(function (id) {
         return '<span>' + esc(g.players[id].name) + ' · ' + g.players[id].hand.length + ' 张</span>';
       }).join('');
@@ -609,7 +660,8 @@
       return;
     }
 
-    var p = duo ? active : viewed;
+    var p = net ? viewed : (duo ? active : viewed);
+    if (!p) return;
     var cards = p.hand.slice().sort(function (a, b) { return a.cost - b.cost || a.name.localeCompare(b.name); });
     if (!cards.length) {
       el.hand.innerHTML = '<div class="hand-empty">暂无手牌</div>';
@@ -639,7 +691,9 @@
     }
 
     if (!g.humanTurn) {
-      var me = g.humanIds.length === 1 ? g.players[g.humanId] : null;
+      var netMode = UI.mode === 'net' && UI.net;
+      var me = netMode ? g.players[UI.net.seat]
+        : (g.humanIds.length === 1 ? g.players[g.humanId] : null);
       if (g.phase === 'play' && me && me.role && me.role === g.killed) {
         el.actionbar.innerHTML = '<div class="wait-row is-dead">' + CIT.ICONS.assassin +
           '<span>你的【' + E.charName(me.role) + '】被暗杀，本轮跳过</span></div>';
@@ -659,6 +713,12 @@
     }
 
     var ht = g.humanTurn;
+    var net = UI.mode === 'net' && UI.net;
+    if (net && ht.playerId !== UI.net.seat) {
+      el.actionbar.innerHTML = '<div class="wait-row"><span class="pulse-dot"></span>等待 ' +
+        esc(g.players[ht.playerId].name) + ' 行动…</div>';
+      return;
+    }
     var p = g.players[ht.playerId];
     var def = E.charDef(ht.charId);
     var top = '<div class="ab-top"><span class="role-tag">' + CIT.ICONS[def.key] + def.name + '</span>' +
@@ -699,6 +759,7 @@
 
     var ht = g.humanTurn;
     var p = ht ? g.players[ht.playerId] : E.humanPlayer(g);
+    if (UI.mode === 'net' && UI.net && (!ht || ht.playerId !== UI.net.seat)) return;
 
     if (act === 'gold') {
       if (!ht) return;
@@ -737,6 +798,10 @@
     var g = UI.g;
     if (!g) return;
     var ht = g.humanTurn;
+    if (UI.mode === 'net' && UI.net && (!ht || ht.playerId !== UI.net.seat)) {
+      UI.showCardInfo(uid);
+      return;
+    }
     if (ht && !ht.actionDone) {
       UI.toastMsg('请先执行行动：拿金币或抽卡');
       return;
@@ -1199,6 +1264,80 @@
     });
   };
 
+  /* ---------------- 联机（客人侧） ---------------- */
+
+  UI.netWelcome = function () {};
+
+  UI.netState = function (view) {
+    if (!view) return;
+    var first = !(UI.net && UI.net.role === 'guest');
+    UI.g = view;
+    UI.mode = 'net';
+    if (first) {
+      UI.net = { role: 'guest', seat: view.mySeat, room: view.room };
+      UI.installNetShims();
+      UI.resultsShown = false;
+      UI.sheetOpen = false;
+      UI.pass = null;
+      UI.unlockedKey = null;
+      UI.lastActive = view.mySeat;
+      var s = $('start'); if (s) s.classList.add('hidden');
+      var nr = $('netroom'); if (nr) { nr.classList.add('hidden'); nr.innerHTML = ''; }
+      var ov = $('overlay'); if (ov) { ov.classList.add('hidden'); ov.innerHTML = ''; }
+      var ps = $('pass'); if (ps) { ps.classList.add('hidden'); ps.innerHTML = ''; }
+    }
+    UI.netBusy = 0;
+    UI.viewId = view.mySeat;
+    UI.render();
+    UI.flash();
+    UI.netGuestCheck();
+  };
+
+  UI.netGuestCheck = function () {
+    var g = UI.g;
+    if (!g || !UI.net || UI.net.role !== 'guest') return;
+    if (g.over) { UI.showResults(); return; }
+    if (UI.sheetOpen) return;
+    if (UI.netBusy && Date.now() - UI.netBusy < 4000) return;
+    if (g.pending && g.pending.playerId === UI.net.seat) { UI.showDraft(); return; }
+    if (g.humanTurn && g.humanTurn.playerId === UI.net.seat && g.humanTurn.drawn) {
+      UI.showDrawPick(g.humanTurn.drawn.cards, g.humanTurn.drawn.keep);
+    }
+  };
+
+  UI.installNetShims = function () {
+    if (!UI.netOrig) {
+      UI.netOrig = {};
+      ['humanTakeGold', 'humanTakeCards', 'humanChooseDrawn', 'humanBuild', 'endHumanTurn',
+        'pickCharacter', 'humanAssassinate', 'humanSteal', 'humanMagicianSwap',
+        'humanMagicianDiscard', 'humanWarlordDestroy', 'humanLab', 'humanSmithy'
+      ].forEach(function (k) { UI.netOrig[k] = E[k]; });
+    }
+    var send = function (msg) {
+      UI.netBusy = Date.now();
+      if (CIT.Net) CIT.Net.sendAction(msg);
+    };
+    E.humanTakeGold = function () { send({ a: 'gold' }); return true; };
+    E.humanTakeCards = function () { send({ a: 'cards' }); return null; };
+    E.humanChooseDrawn = function (g, uids) { send({ a: 'choose', uids: uids }); return true; };
+    E.humanBuild = function (g, uid) { send({ a: 'build', uid: uid }); return { ok: true }; };
+    E.endHumanTurn = function () { send({ a: 'end' }); return true; };
+    E.pickCharacter = function (g, id) { send({ a: 'pick', charId: id }); return true; };
+    E.humanAssassinate = function (g, id) { send({ a: 'assassin', charId: id }); return true; };
+    E.humanSteal = function (g, id) { send({ a: 'steal', charId: id }); return true; };
+    E.humanMagicianSwap = function (g, pid) { send({ a: 'magswap', target: pid }); return true; };
+    E.humanMagicianDiscard = function (g, uids) { send({ a: 'magdiscard', uids: uids }); return true; };
+    E.humanWarlordDestroy = function (g, owner, uid) { send({ a: 'warlord', owner: owner, uid: uid }); return { ok: true }; };
+    E.humanLab = function (g, uid) { send({ a: 'lab', uid: uid }); return { ok: true }; };
+    E.humanSmithy = function () { send({ a: 'smithy' }); return { ok: true }; };
+  };
+
+  UI.restoreNetShims = function () {
+    if (!UI.netOrig) return;
+    Object.keys(UI.netOrig).forEach(function (k) { E[k] = UI.netOrig[k]; });
+    UI.netOrig = null;
+  };
+
   /* ---------------- 结算 ---------------- */
 
   UI.showResults = function (force) {
@@ -1209,31 +1348,45 @@
     UI.resultsShown = true;
 
     var duo = g.humanIds.length > 1;
+    var net = UI.mode === 'net' && UI.net;
     var rows = g.results.map(function (r, i) {
+      var isMe = net ? (r.id === UI.net.seat) : (r.isHuman && !duo);
       return '<div class="score-row' + (r.winner ? ' win' : '') + '">' +
         '<div class="score-rank">' + (r.winner ? '♛' : (i + 1)) + '</div>' +
-        '<div class="score-main"><div class="score-name' + (r.isHuman && !duo ? ' you' : '') + '">' +
-        esc(r.name) + (r.isHuman && !duo ? '（你）' : '') + '</div>' +
+        '<div class="score-main"><div class="score-name' + (isMe ? ' you' : '') + '">' +
+        esc(r.name) + (isMe ? '（你）' : '') + '</div>' +
         '<div class="score-sub">' + r.districts + ' 座地区 · 基础 ' + r.base +
         ' + 五色 ' + r.colorBonus + ' + 八座 ' + r.firstBonus + '</div></div>' +
         '<div class="score-total">' + r.total + '</div></div>';
     }).join('');
 
+    var winLine = '得分最高的城主获得胜利。';
+    if (net) {
+      if (g.results[0].winner && g.results[0].id === UI.net.seat) winLine = '你的王城赢得了本局荣耀。';
+    } else if (!duo && g.results[0].winner && g.results[0].isHuman) {
+      winLine = '你的王城赢得了本局荣耀。';
+    }
+
     UI.openSheet({
       title: '王城结算',
-      sub: (!duo && g.results[0].winner && g.results[0].isHuman) ? '你的王城赢得了本局荣耀。' : '得分最高的城主获得胜利。',
+      sub: winLine,
       body: rows + '<p class="muted-note">计分规则：全部地区造价之和；集齐五色 +3；首位建成 8 座 +4，其余达成 8 座 +2。同分并列。</p>',
-      footer: '<button class="btn ghost" id="res-home">回到首页</button>' +
-        '<button class="btn primary" id="res-again" style="flex:2 1 0">再来一局</button>',
+      footer: net
+        ? '<button class="btn primary" id="res-home">返回首页</button>'
+        : '<button class="btn ghost" id="res-home">回到首页</button>' +
+          '<button class="btn primary" id="res-again" style="flex:2 1 0">再来一局</button>',
       onMount: function (root) {
         root.querySelector('#res-home').addEventListener('click', function () {
           UI.closeSheet(false);
           UI.backHome();
         });
-        root.querySelector('#res-again').addEventListener('click', function () {
-          UI.closeSheet(false);
-          UI.startGame(UI.count);
-        });
+        var again = root.querySelector('#res-again');
+        if (again) {
+          again.addEventListener('click', function () {
+            UI.closeSheet(false);
+            UI.startGame(UI.count, UI.mode);
+          });
+        }
       }
     });
   };
