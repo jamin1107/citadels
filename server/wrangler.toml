@@ -1,0 +1,18 @@
+name = "citadels-room"
+main = "worker.js"
+compatibility_date = "2025-06-01"
+
+# 前端静态页面与房间服务合一部署：静态资源优先返回，未命中的 /api/room、/ws 落到 Worker
+[assets]
+directory = ".."
+
+[observability]
+enabled = true
+
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "Room"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]

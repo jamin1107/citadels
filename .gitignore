@@ -1,0 +1,4 @@
+.DS_Store
+node_modules/
+server/.wrangler/
+assets/art/_src/

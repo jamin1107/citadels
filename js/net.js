@@ -1,99 +1,70 @@
-/* 富饶之城 · 无服务器联机（WebRTC 手动交换邀请码） */
+/* 富饶之城 · 在线联机（房间服务 + WebSocket）
+ *
+ * 房主建房 → 得到一个 4 位房号与分享链接 → 朋友点链接/输入房号即进房。
+ * 对局逻辑仍在房主浏览器里运算，服务端只做座位管理与消息转发。
+ * 服务地址在 index.html 中通过 window.CIT_NET_SERVER 配置。
+ */
 (function () {
   var CIT = (window.CIT = window.CIT || {});
   var E = CIT.Engine;
   var Net = (CIT.Net = {});
 
-  var RESP_PREFIX = 'citadels_resp_';
+  var SEAT_KEY = 'cit_seat_';
+
   var sm = {
-    role: null,          // host | guest
+    role: null,        // host | guest
     room: '',
     count: 4,
-    peers: {},           // seat -> {pc, dc, connected, code}
-    openSeat: null,
-    guestPc: null,
-    guestDc: null,
-    guestSeat: null,
-    answerCode: '',
-    connectedSeats: [],
+    seat: -1,
+    ws: null,
+    open: false,
+    seats: [],         // 当前在线座位
+    err: '',
+    started: false,
+    closing: false,
+    retry: 0,
+    retryTimer: null,
+    pulseTimer: null,
     syncSig: '',
-    syncTimer: null,
-    err: ''
+    syncTimer: null
   };
 
-  function $(id) { return document.getElementById(id); }
+  function $id(id) { return document.getElementById(id); }
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
   }
-  function randRoom() {
-    var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    var out = '';
-    for (var i = 0; i < 4; i++) out += chars.charAt(Math.floor(Math.random() * chars.length));
-    return out;
+
+  function httpBase() {
+    var v = String(window.CIT_NET_SERVER || '').trim().replace(/\/+$/, '');
+    if (v) return v;
+    // 未显式配置时默认同源：前端与房间服务合一部署在同一域名下直接可用
+    if (/^https?:$/.test(location.protocol)) return location.origin;
+    return '';
   }
-  function b64url(bytes) {
-    var s = '';
-    for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
-    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  function wsBase() {
+    return httpBase().replace(/^http/, 'ws');
   }
-  function fromB64url(str) {
-    var s = str.replace(/-/g, '+').replace(/_/g, '/');
-    while (s.length % 4) s += '=';
-    var bin = atob(s);
-    var u8 = new Uint8Array(bin.length);
-    for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
-    return u8;
+  function configured() {
+    return /^https?:\/\//.test(httpBase());
   }
-  async function pack(obj) {
-    var json = JSON.stringify(obj);
-    if (typeof CompressionStream !== 'undefined') {
-      try {
-        var stream = new Blob([json]).stream().pipeThrough(new CompressionStream('gzip'));
-        var buf = await new Response(stream).arrayBuffer();
-        return 'z' + b64url(new Uint8Array(buf));
-      } catch (e) {}
-    }
-    return 'j' + b64url(new TextEncoder().encode(json));
+  function shareLink() {
+    var base = location.origin + location.pathname + '?room=' + sm.room;
+    // 本地调试时把服务地址一起带给被邀请的人，线上不生效
+    var net = new URLSearchParams(location.search).get('net');
+    return net ? base + '&net=' + encodeURIComponent(net) : base;
   }
-  async function unpack(code) {
-    code = String(code || '').trim();
-    if (!code) throw new Error('邀请码为空');
-    var kind = code.charAt(0);
-    var bytes = fromB64url(code.slice(1));
-    var json;
-    if (kind === 'z') {
-      var stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
-      json = await new Response(stream).text();
-    } else if (kind === 'j') {
-      json = new TextDecoder().decode(bytes);
-    } else {
-      throw new Error('邀请码格式无法识别');
-    }
-    return JSON.parse(json);
+  function readSeat(room) {
+    try {
+      var v = localStorage.getItem(SEAT_KEY + room);
+      return v == null ? null : Number(v);
+    } catch (e) { return null; }
   }
-  function waitIce(pc) {
-    return new Promise(function (resolve) {
-      if (pc.iceGatheringState === 'complete') return resolve();
-      var done = false;
-      function check() {
-        if (done) return;
-        if (pc.iceGatheringState === 'complete') {
-          done = true;
-          pc.removeEventListener('icegatheringstatechange', check);
-          resolve();
-        }
-      }
-      pc.addEventListener('icegatheringstatechange', check);
-      setTimeout(function () {
-        if (!done) { done = true; resolve(); }
-      }, 2500);
-    });
+  function saveSeat(room, seat) {
+    try { localStorage.setItem(SEAT_KEY + room, String(seat)); } catch (e) { /* ignore */ }
   }
-  function makeUrl(hash) {
-    return location.origin + location.pathname + location.search + hash;
-  }
+
   function qrSVG(text) {
     try {
       if (typeof qrcode !== 'function') return '';
@@ -115,356 +86,390 @@
     ta.value = text;
     document.body.appendChild(ta);
     ta.select();
-    try { document.execCommand('copy'); } catch (e) {}
+    try { document.execCommand('copy'); } catch (e) { /* ignore */ }
     document.body.removeChild(ta);
   }
 
   /* ---------------- 房间界面 ---------------- */
 
   function showRoom(html) {
-    var el = $('netroom');
+    var el = $id('netroom');
     if (!el) return;
     el.innerHTML = '<div class="net-card">' + html + '</div>';
     el.classList.remove('hidden');
-    var start = $('start');
+    var start = $id('start');
     if (start) start.classList.add('hidden');
   }
   function hideRoom() {
-    var el = $('netroom');
+    var el = $id('netroom');
     if (!el) return;
     el.classList.add('hidden');
     el.innerHTML = '';
   }
   function netErr(msg) {
     sm.err = msg || '';
-    var box = $('net-room-err');
+    var box = $id('net-room-err');
     if (box) { box.textContent = sm.err; box.classList.toggle('hidden', !sm.err); }
+  }
+  function backToStart() {
+    sm.closing = true;
+    sm.role = null;
+    stopPulse();
+    if (sm.ws) { try { sm.ws.close(1000, 'leave'); } catch (e) {} sm.ws = null; }
+    clearTimeout(sm.retryTimer);
+    hideRoom();
+    var s = $id('start');
+    if (s) s.classList.remove('hidden');
+  }
+  function bindBack() {
+    var b = $id('net-back');
+    if (b) b.addEventListener('click', backToStart);
   }
 
   Net.openLobby = function (count) {
-    sm.count = count;
-    sm.role = null;
+    sm.count = count || 4;
     sm.err = '';
+    sm.role = null;
+    sm.started = false;
     showRoom(
-      '<div class="net-head"><span class="net-kicker">局域网联机</span>' +
+      '<div class="net-head"><span class="net-kicker">在线联机</span>' +
       '<button class="net-close" id="net-back">返回</button></div>' +
-      '<h2>同一 WiFi，开一桌</h2>' +
-      '<p class="net-sub">无需服务器。流程：房主出示邀请码 → 客人扫码生成应答码 → 房主用相机扫应答码即自动连接。' +
-      '也可以全程复制/粘贴。真人 1–3 位，剩余座位由 AI 补全。</p>' +
+      '<h2>建房间，发链接</h2>' +
+      '<p class="net-sub">房主创建房间后把链接发到群里，朋友点开就进房。真人 1–3 位，剩余座位由 AI 补全。</p>' +
       '<div class="net-choice">' +
       '<button class="btn primary" id="net-host">创建房间（我是房主）</button>' +
-      '<button class="btn" id="net-join">加入房间（我是客人）</button>' +
+      '<button class="btn" id="net-join">输入房号加入</button>' +
       '</div>' +
-      '<p class="net-tip">建议在 Safari / Chrome 中打开；手机需与房主处于同一 WiFi。</p>'
+      '<p class="net-tip" id="net-room-err"></p>'
     );
-    $('net-back').addEventListener('click', function () { hideRoom(); var s = $('start'); if (s) s.classList.remove('hidden'); });
-    $('net-host').addEventListener('click', function () { Net.createRoom(); });
-    $('net-join').addEventListener('click', function () { Net.showJoin(); });
+    bindBack();
+    $id('net-host').addEventListener('click', function () { Net.createRoom(); });
+    $id('net-join').addEventListener('click', function () { Net.showJoin(); });
+    if (!configured()) {
+      netErr('联机服务地址未配置（index.html 里的 CIT_NET_SERVER）');
+    }
   };
 
   Net.showJoin = function () {
     showRoom(
       '<div class="net-head"><span class="net-kicker">加入房间</span>' +
       '<button class="net-close" id="net-back">返回</button></div>' +
-      '<h2>粘贴房主的邀请码</h2>' +
-      '<p class="net-sub">如果房主给你看了二维码，直接用系统相机扫码即可自动进入此步骤。</p>' +
-      '<textarea class="net-textarea" id="net-offer" placeholder="粘贴邀请码"></textarea>' +
+      '<h2>输入 4 位房号</h2>' +
+      '<p class="net-sub">有分享链接的话直接点链接进来更快。</p>' +
+      '<input class="net-textarea" id="net-code-input" maxlength="4" autocapitalize="characters" ' +
+      'autocomplete="off" placeholder="例如 A3KD" style="height:44px;text-align:center;' +
+      'font-size:18px;letter-spacing:.2em;color:#f2dfae">' +
       '<div class="net-error hidden" id="net-room-err"></div>' +
-      '<button class="btn primary" id="net-gen">生成应答码</button>' +
-      '<p class="net-tip">生成后把应答码发给房主（截图扫码或复制粘贴）。</p>'
+      '<button class="btn primary" id="net-join-go">进入房间</button>'
     );
-    $('net-back').addEventListener('click', function () { hideRoom(); var s = $('start'); if (s) s.classList.remove('hidden'); });
-    $('net-gen').addEventListener('click', function () {
-      var code = $('net-offer').value.trim();
-      if (!code) return netErr('请先粘贴邀请码');
+    bindBack();
+    var input = $id('net-code-input');
+    function go() {
+      var code = (input.value || '').trim().toUpperCase();
+      if (!/^[A-Z0-9]{3,8}$/.test(code)) return netErr('房号格式不对');
       netErr('');
-      Net.joinWithOffer(code, false);
-    });
+      Net.joinRoom(code);
+    }
+    $id('net-join-go').addEventListener('click', go);
+    input.addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); });
+    setTimeout(function () { try { input.focus(); } catch (e) {} }, 50);
   };
+
+  /* ---------------- 建房 / 进房 ---------------- */
 
   Net.createRoom = async function () {
     sm.role = 'host';
-    sm.room = randRoom();
-    sm.peers = {};
-    sm.connectedSeats = [];
-    sm.count = sm.count || 4;
-    showRoom('<h2>创建中…</h2><p class="net-sub">正在生成本机邀请码</p>');
+    sm.started = false;
+    sm.seat = 0;
+    sm.seats = [];
+    sm.retry = 0;
+    if (!configured()) {
+      netErr('联机服务地址未配置（index.html 里的 CIT_NET_SERVER）');
+      return;
+    }
+    showRoom('<h2>创建房间…</h2><p class="net-sub">正在分配房号</p>');
     try {
-      await openSlot(1);
+      var res = await fetch(httpBase() + '/api/room', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ count: sm.count })
+      });
+      var data = await res.json().catch(function () { return {}; });
+      if (!res.ok || !data || !data.code) throw new Error((data && data.error) || '创建失败，请重试');
+      sm.room = data.code;
+      connect(0, true);
     } catch (e) {
-      showRoom('<h2>创建失败</h2><p class="net-sub">' + esc(e.message) + '</p>');
+      showRoom(
+        '<div class="net-head"><button class="net-close" id="net-back">返回</button></div>' +
+        '<h2>创建失败</h2><p class="net-sub">' + esc(e.message) + '</p>'
+      );
+      bindBack();
     }
   };
 
-  async function openSlot(seat) {
-    if (sm.openSeat && sm.peers[sm.openSeat] && !sm.peers[sm.openSeat].connected) {
-      try { sm.peers[sm.openSeat].pc.close(); } catch (e) {}
-      delete sm.peers[sm.openSeat];
+  Net.joinRoom = function (code) {
+    code = String(code || '').trim().toUpperCase();
+    if (!/^[A-Z0-9]{3,8}$/.test(code)) {
+      showRoom(
+        '<div class="net-head"><button class="net-close" id="net-back">返回</button></div>' +
+        '<h2>房号无效</h2><p class="net-sub">请向房主要 4 位房号。</p>'
+      );
+      bindBack();
+      return;
     }
-    var pc = new RTCPeerConnection({ iceServers: [] });
-    var dc = pc.createDataChannel('game', { ordered: true });
-    var peer = { pc: pc, dc: dc, connected: false, seat: seat, code: '' };
-    sm.peers[seat] = peer;
-    sm.openSeat = seat;
-    bindPeer(peer);
-    await pc.setLocalDescription(await pc.createOffer());
-    await waitIce(pc);
-    var code = await pack({
-      v: 1, room: sm.room, seat: seat, type: 'offer',
-      sdp: pc.localDescription.sdp
-    });
-    peer.code = code;
-    renderHostRoom();
+    sm.role = 'guest';
+    sm.room = code;
+    sm.seat = -1;
+    sm.seats = [];
+    sm.started = false;
+    sm.retry = 0;
+    showGuestWait('正在进入房间…');
+    connect(null, false);
+  };
+
+  function connect(seat, host) {
+    if (!configured()) {
+      showGuestWait('联机服务地址未配置');
+      return;
+    }
+    var url = wsBase() + '/ws?room=' + encodeURIComponent(sm.room);
+    if (host) {
+      url += '&host=1&count=' + sm.count;
+    } else if (seat != null) {
+      url += '&seat=' + seat;
+    } else {
+      var rs = readSeat(sm.room);
+      if (rs != null) url += '&resume=' + rs;
+    }
+
+    var ws;
+    try {
+      ws = new WebSocket(url);
+    } catch (e) {
+      onClosed();
+      return;
+    }
+    sm.ws = ws;
+    sm.open = false;
+    sm.closing = false;
+
+    ws.onopen = function () {
+      sm.open = true;
+      sm.retry = 0;
+      startPulse();
+    };
+    ws.onmessage = function (ev) { handle(ev.data); };
+    ws.onclose = function () {
+      sm.open = false;
+      stopPulse();
+      if (sm.ws === ws) sm.ws = null;
+      onClosed();
+    };
+    ws.onerror = function () { /* onclose 会跟着来 */ };
   }
 
-  function bindPeer(peer) {
-    var seat = peer.seat;
-    peer.dc.onopen = function () {
-      peer.connected = true;
-      sm.connectedSeats = Object.keys(sm.peers).filter(function (k) {
-        return sm.peers[k].connected;
-      }).map(Number).sort();
-      if (sm.openSeat === seat) sm.openSeat = null;
-      try {
-        peer.dc.send(JSON.stringify({ t: 'welcome', seat: seat, room: sm.room }));
-      } catch (e) {}
-      var g = CIT.UI && CIT.UI.g;
-      if (g && CIT.UI.net && CIT.UI.net.role === 'host') {
-        try { peer.dc.send(JSON.stringify({ t: 'state', view: buildView(g, seat) })); } catch (e) {}
-      }
-      renderHostRoom();
-    };
-    peer.dc.onclose = function () {
-      peer.connected = false;
-      sm.connectedSeats = sm.connectedSeats.filter(function (s) { return s !== seat; });
-      var g = CIT.UI && CIT.UI.g;
-      if (g && !g.over && CIT.UI.net && CIT.UI.net.role === 'host') takeover(seat, g);
-      renderHostRoom();
-    };
-    peer.dc.onmessage = function (ev) {
-      var msg;
-      try { msg = JSON.parse(ev.data); } catch (e) { return; }
-      if (!msg || msg.t !== 'action') return;
-      Net.applyAction(seat, msg);
-    };
+  function send(obj) {
+    if (!sm.ws || sm.ws.readyState !== 1) return false;
+    try { sm.ws.send(JSON.stringify(obj)); return true; } catch (e) { return false; }
+  }
+  function sendTo(seat, payload) {
+    return send({ t: 'relay', to: seat, payload: payload });
   }
 
-  /* 掉线后自动托管该座位，避免整局卡死 */
-  function takeover(seat, g) {
-    var p = g.players[seat];
-    if (!p) return;
-    if (g.pending && g.pending.playerId === seat) {
-      var pick = (CIT.aiPickCharacter && CIT.aiPickCharacter(g, p)) || g.pool[0];
-      E.pickCharacter(g, pick);
-    } else if (g.humanTurn && g.humanTurn.playerId === seat) {
-      if (!g.humanTurn.actionDone) E.humanTakeGold(g);
-      var tries = 0;
-      while (g.humanTurn && g.humanTurn.buildsLeft > 0 && tries++ < 4) {
-        var opts = p.hand.filter(function (c) { return !E.buildIssue(p, c); });
-        if (!opts.length) break;
-        E.humanBuild(g, opts[0].uid);
-      }
-      E.endHumanTurn(g);
+  function handle(raw) {
+    var msg;
+    try { msg = JSON.parse(raw); } catch (e) { return; }
+    if (!msg || !msg.t) return;
+
+    switch (msg.t) {
+      case 'room':
+        sm.room = msg.room || sm.room;
+        sm.seat = msg.seat;
+        sm.count = msg.count || sm.count;
+        sm.seats = msg.seats || [msg.seat];
+        if (sm.role === 'guest') saveSeat(sm.room, sm.seat);
+        renderByRole();
+        break;
+      case 'seats':
+        sm.seats = msg.seats || [];
+        renderByRole();
+        break;
+      case 'peer':
+        if (msg.seats) sm.seats = msg.seats;
+        if (sm.role === 'guest') {
+          if (msg.event === 'leave' && msg.seat === 0) {
+            sm.closing = true;
+            showGuestWait('房主已离开房间');
+          }
+          break;
+        }
+        if (msg.event === 'join') {
+          renderHostRoom();
+          if (!sm.started) CIT.UI.toastMsg('玩家' + (msg.seat + 1) + ' 已进房');
+          else broadcast();
+        } else if (msg.event === 'leave') {
+          var g = CIT.UI && CIT.UI.g;
+          if (sm.started && g && !g.over) takeover(msg.seat, g);
+          else renderHostRoom();
+        }
+        break;
+      case 'payload':
+        applyPayload(msg.from, msg.payload);
+        break;
+      case 'error':
+        sm.err = msg.message || '联机出错';
+        if (sm.role === 'host' && !sm.started) renderHostRoom();
+        else netErr(sm.err);
+        break;
+      case 'closed':
+        if (sm.role === 'guest' && !sm.started) {
+          showGuestWait(msg.message || '房主已离开房间');
+        }
+        sm.closing = true;
+        break;
+      case 'pulse':
+        break;
     }
-    p.isHuman = false;
-    g.humanIds = g.humanIds.filter(function (id) { return id !== seat; });
-    CIT.UI.toastMsg(p.name + ' 掉线，已改由 AI 接管');
-    CIT.UI.render();
-    CIT.UI.pump();
+  }
+
+  function applyPayload(from, p) {
+    if (!p || !p.t) return;
+    var UI = CIT.UI;
+    if (sm.role === 'host') {
+      if (p.t === 'action') Net.applyAction(from, p);
+      return;
+    }
+    if (p.t === 'state' && p.view) {
+      sm.started = true;
+      UI.netWelcome();
+      UI.netState(p.view);
+    }
+  }
+
+  function onClosed() {
+    if (sm.closing || !sm.role) return;
+    if (sm.retry >= 5) {
+      sm.role === 'guest' ? showGuestWait('连接断开，点返回重新进房') : showHostBroken();
+      return;
+    }
+    sm.retry++;
+    var delay = Math.min(4000, 600 * sm.retry);
+    if (sm.role === 'guest') showGuestWait('连接中断，正在重连…');
+    else if (!sm.started) renderHostRoom();
+    clearTimeout(sm.retryTimer);
+    sm.retryTimer = setTimeout(function () {
+      if (sm.role === 'host') connect(0, true);
+      else connect(sm.seat >= 1 ? sm.seat : null, false);
+    }, delay);
+  }
+
+  function showHostBroken() {
+    showRoom(
+      '<div class="net-head"><span class="net-kicker">房间 ' + esc(sm.room) + '</span>' +
+      '<button class="net-close" id="net-back">关闭</button></div>' +
+      '<h2>与服务器的连接断开了</h2>' +
+      '<p class="net-sub">刷新页面可以重新建房；对局进度无法恢复。</p>'
+    );
+    bindBack();
+  }
+
+  function startPulse() {
+    stopPulse();
+    sm.pulseTimer = setInterval(function () {
+      if (sm.open) send({ t: 'pulse' });
+    }, 25000);
+  }
+  function stopPulse() {
+    clearInterval(sm.pulseTimer);
+    sm.pulseTimer = null;
+  }
+
+  /* ---------------- 房主房间界面 ---------------- */
+
+  function renderByRole() {
+    if (sm.role === 'host') renderHostRoom();
+    else if (sm.role === 'guest') showGuestWait(sm.started ? '' : '等待房主开始游戏…');
+  }
+
+  function seatChips() {
+    return sm.seats.map(function (s) {
+      return '<span>' + (s === 0 ? '房主(我)' : '玩家' + (s + 1)) + '</span>';
+    }).join('');
   }
 
   function renderHostRoom() {
     if (sm.role !== 'host') return;
-    var seats = Object.keys(sm.peers).map(Number).sort();
-    var connected = seats.filter(function (s) { return sm.peers[s].connected; });
-    var open = seats.filter(function (s) { return !sm.peers[s].connected; })[0];
-    var peer = open != null ? sm.peers[open] : null;
-    var nextSeat = 1;
-    connected.forEach(function (s) { if (s >= nextSeat) nextSeat = s + 1; });
-    if (open != null && nextSeat <= open) nextSeat = open + 1;
-    var canAdd = nextSeat <= sm.count - 1 && connected.length < sm.count - 1;
+    var link = shareLink();
+    var guests = sm.seats.filter(function (s) { return s !== 0; });
+    var qr = qrSVG(link);
+    var status = sm.open
+      ? (guests.length ? '已进房 ' + guests.length + ' 位。可以开始了，空位由 AI 补上。' : '还没人进房，把链接发出去吧。')
+      : '连接中断，正在重连…';
 
-    var html = '<div class="net-head"><span class="net-kicker">房主 · 房间 ' + esc(sm.room) + '</span>' +
+    var html =
+      '<div class="net-head"><span class="net-kicker">房主 · 房间 ' + esc(sm.room) + '</span>' +
       '<button class="net-close" id="net-back">关闭</button></div>' +
-      '<h2>' + sm.count + ' 人桌 · ' + (connected.length + 1) + ' 位真人</h2>';
-
-    if (peer) {
-      var url = makeUrl('#offer=' + peer.code);
-      var qr = qrSVG(url);
-      html += '<p class="net-sub">让客人用系统相机扫描，或把邀请码发给他。</p>' +
-        (qr ? '<div class="net-qr">' + qr + '</div>' : '<p class="net-tip">二维码过长，请复制邀请码。</p>') +
-        '<div class="net-label">邀请码（座位 ' + (peer.seat + 1) + '）</div>' +
-        '<textarea class="net-code" id="net-code" readonly>' + esc(peer.code) + '</textarea>' +
-        '<button class="btn mini" id="net-copy-offer">复制邀请码</button>' +
-        '<button class="btn mini" id="net-regen">重新生成邀请码</button>' +
-        '<div class="net-label">客人回传的应答码</div>' +
-        '<p class="net-tip">让客人把应答二维码给你扫（手机相机扫码后会自动回到本页连接），或粘贴应答码。</p>' +
-        '<textarea class="net-textarea" id="net-answer" placeholder="粘贴客人发来的应答码"></textarea>' +
-        '<button class="btn primary" id="net-connect">连接这位客人</button>';
-    } else {
-      html += '<p class="net-sub">' + (connected.length
-        ? '已连接 ' + connected.length + ' 位客人。可以继续添加，或直接开始（其余座位由 AI 补位）。'
-        : '') + '</p>';
-    }
-
-    html += '<div class="net-connected"><b>已入座</b><span>房主</span>' +
-      connected.map(function (s) { return '<span>玩家' + (s + 1) + '</span>'; }).join('') +
-      '</div>';
-
-    if (canAdd && !peer) html += '<button class="btn" id="net-add">添加下一位玩家</button>';
-    if (canAdd && peer) html += '<p class="net-tip">当前邀请码是座位 ' + (peer.seat + 1) + ' 的；连接后可继续添加。</p>';
-    html += '<div class="net-error hidden" id="net-room-err">' + esc(sm.err) + '</div>';
-    html += '<div class="net-actions">' +
-      '<button class="btn' + (connected.length ? ' primary' : '') + '" id="net-start"' +
-      (connected.length ? '' : ' disabled') + '>开始游戏</button>' +
+      '<h2>' + sm.count + ' 人桌 · ' + (guests.length + 1) + ' 位真人</h2>' +
+      '<p class="net-sub">' + esc(status) + '</p>' +
+      (qr ? '<div class="net-qr">' + qr + '</div>' : '') +
+      '<div class="net-label">分享链接（发到微信即可，点开自动进房）</div>' +
+      '<textarea class="net-code" id="net-link" readonly>' + esc(link) + '</textarea>' +
+      '<button class="btn mini" id="net-copy-link">复制链接</button>' +
+      '<button class="btn mini" id="net-copy-code">复制房号</button>' +
+      '<div class="net-label">房号</div>' +
+      '<p class="net-sub" style="font-size:22px;letter-spacing:.24em;color:#f2dfae;margin:0 0 4px">' +
+      esc(sm.room) + '</p>' +
+      '<div class="net-connected"><b>已入座</b>' + seatChips() + '</div>' +
+      '<div class="net-error' + (sm.err ? '' : ' hidden') + '" id="net-room-err">' + esc(sm.err) + '</div>' +
+      '<div class="net-actions">' +
+      '<button class="btn' + (guests.length ? ' primary' : '') + '" id="net-start"' +
+      (guests.length && sm.open ? '' : ' disabled') + '>开始游戏</button>' +
       '</div>' +
-      '<p class="net-tip">真人座位填满后剩余位置由 AI 补全。开始后不能再加入。</p>';
+      '<p class="net-tip">开始后不能再进人；掉线的座位会自动交给 AI。</p>';
 
     showRoom(html);
-    if ($('net-room-err') && sm.err) $('net-room-err').classList.remove('hidden');
-
-    $('net-back').addEventListener('click', function () {
-      Object.keys(sm.peers).forEach(function (k) { try { sm.peers[k].pc.close(); } catch (e) {} });
-      sm.peers = {};
-      sm.role = null;
-      hideRoom();
-      var s = $('start'); if (s) s.classList.remove('hidden');
-    });
-    if ($('net-copy-offer')) {
-      $('net-copy-offer').addEventListener('click', function () {
-        copyText(peer.code);
-        CIT.UI.toastMsg('邀请码已复制');
+    bindBack();
+    if ($id('net-copy-link')) {
+      $id('net-copy-link').addEventListener('click', function () {
+        copyText(link);
+        CIT.UI.toastMsg('链接已复制，去微信粘贴');
       });
     }
-    if ($('net-regen')) {
-      $('net-regen').addEventListener('click', function () {
-        openSlot(peer.seat).catch(function (e) { netErr(e.message); });
+    if ($id('net-copy-code')) {
+      $id('net-copy-code').addEventListener('click', function () {
+        copyText(sm.room);
+        CIT.UI.toastMsg('房号已复制');
       });
     }
-    if ($('net-connect')) {
-      $('net-connect').addEventListener('click', function () {
-        var code = $('net-answer').value.trim();
-        if (!code) return netErr('请先粘贴应答码');
-        netErr('');
-        Net.applyAnswer(code, peer.seat).catch(function (e) { netErr(e.message); });
-      });
-    }
-    if ($('net-add')) {
-      $('net-add').addEventListener('click', function () {
-        openSlot(nextSeat).catch(function (e) { netErr(e.message); });
-      });
-    }
-    if ($('net-start')) {
-      $('net-start').addEventListener('click', function () {
-        if (!connected.length) return;
-        Net.startGame();
-      });
+    if ($id('net-start')) {
+      $id('net-start').addEventListener('click', function () { Net.startGame(); });
     }
   }
 
-  Net.applyAnswer = async function (codeText, expectSeat) {
-    var ans = await unpack(codeText);
-    if (!ans || ans.type !== 'answer') throw new Error('这不是应答码');
-    if (ans.room !== sm.room) throw new Error('应答码不属于本房间');
-    if (expectSeat != null && ans.seat !== expectSeat) throw new Error('应答码座位不匹配');
-    var peer = sm.peers[ans.seat];
-    if (!peer) throw new Error('该座位的邀请已失效，请重新生成');
-    if (peer.connected) throw new Error('该座位已连接');
-    await peer.pc.setRemoteDescription({ type: 'answer', sdp: ans.sdp });
-    // 连接在 dc.onopen 中确认
-  };
-
-  /* ---------------- 客人 ---------------- */
-
-  Net.joinWithOffer = async function (offerCode, auto) {
-    sm.role = 'guest';
-    showRoom('<h2>生成应答码…</h2><p class="net-sub">正在与本机建立连接</p>');
-    try {
-      var off = await unpack(offerCode);
-      if (!off || off.type !== 'offer') throw new Error('邀请码无效');
-      sm.room = off.room;
-      sm.guestSeat = off.seat;
-      var pc = new RTCPeerConnection({ iceServers: [] });
-      sm.guestPc = pc;
-      pc.ondatachannel = function (ev) {
-        sm.guestDc = ev.channel;
-        bindGuestDc(ev.channel);
-      };
-      await pc.setRemoteDescription({ type: 'offer', sdp: off.sdp });
-      await pc.setLocalDescription(await pc.createAnswer());
-      await waitIce(pc);
-      var code = await pack({
-        v: 1, room: off.room, seat: off.seat, type: 'answer',
-        sdp: pc.localDescription.sdp
-      });
-      sm.answerCode = code;
-      renderGuestAnswer(auto);
-    } catch (e) {
-      showRoom('<div class="net-head"><button class="net-close" id="net-back">返回</button></div>' +
-        '<h2>加入失败</h2><p class="net-sub">' + esc(e.message) + '</p>');
-      $('net-back').addEventListener('click', function () { hideRoom(); var s = $('start'); if (s) s.classList.remove('hidden'); });
-    }
-  };
-
-  function bindGuestDc(dc) {
-    dc.onopen = function () {
-      var st = $('net-guest-status');
-      if (st) st.textContent = '已连接，等待房主开始游戏…';
-      CIT.UI.toastMsg('已连接房主');
-    };
-    dc.onmessage = function (ev) {
-      var msg;
-      try { msg = JSON.parse(ev.data); } catch (e) { return; }
-      if (msg.t === 'welcome') {
-        CIT.UI.netWelcome(msg.seat);
-      } else if (msg.t === 'state') {
-        CIT.UI.netState(msg.view);
-      }
-    };
-    dc.onclose = function () {
-      var st = $('net-guest-status');
-      if (st) st.textContent = '连接已断开';
-    };
-  }
-
-  function renderGuestAnswer(auto) {
-    var url = makeUrl('#resp=' + sm.answerCode);
-    var qr = qrSVG(url);
+  function showGuestWait(status) {
+    if (sm.role !== 'guest') return;
+    var code = sm.seat >= 0 ? '座位 ' + (sm.seat + 1) : '分配座位中';
+    var body = status || (sm.open ? '等待房主开始游戏…' : '连接中…');
     showRoom(
-      '<div class="net-head"><span class="net-kicker">客人 · 房间 ' + esc(sm.room) + '</span>' +
+      '<div class="net-head"><span class="net-kicker">房间 ' + esc(sm.room) + '</span>' +
       '<button class="net-close" id="net-back">退出</button></div>' +
-      '<h2>把应答码交给房主</h2>' +
-      '<p class="net-sub">让房主用系统相机扫下面的二维码，或复制应答码发给房主。</p>' +
-      (qr ? '<div class="net-qr">' + qr + '</div>' : '<p class="net-tip">二维码过长，请复制应答码。</p>') +
-      '<textarea class="net-code" id="net-ans-code" readonly>' + esc(sm.answerCode) + '</textarea>' +
-      '<button class="btn primary" id="net-ans-copy">复制应答码</button>' +
-      '<p class="net-tip" id="net-guest-status">等待房主连接…</p>'
+      '<h2>' + esc(code) + '</h2>' +
+      '<p class="net-sub">' + esc(body) + '</p>' +
+      '<div class="net-connected"><b>已入座</b>' + seatChips() + '</div>' +
+      '<p class="net-tip">房主开始后会自动进入对局，这一页不用关。</p>'
     );
-    $('net-back').addEventListener('click', function () {
-      try { if (sm.guestPc) sm.guestPc.close(); } catch (e) {}
-      sm.role = null;
-      hideRoom();
-      var s = $('start'); if (s) s.classList.remove('hidden');
-    });
-    $('net-ans-copy').addEventListener('click', function () {
-      copyText(sm.answerCode);
-      CIT.UI.toastMsg('应答码已复制，请发给房主');
-    });
+    bindBack();
   }
 
   /* ---------------- 开局与同步 ---------------- */
 
   Net.startGame = function () {
-    var seats = sm.connectedSeats.slice(0).sort(function (a, b) { return a - b; });
-    if (!seats.length) { netErr('至少需要一位客人'); return; }
-    // 关闭未使用的邀请
-    Object.keys(sm.peers).forEach(function (k) {
-      var p = sm.peers[Number(k)];
-      if (!p.connected) { try { p.pc.close(); } catch (e) {} delete sm.peers[Number(k)]; }
-    });
-    sm.openSeat = null;
+    var guests = sm.seats.filter(function (s) { return s !== 0; });
+    if (!guests.length) { netErr('至少需要一位玩家'); return; }
+    sm.started = true;
+    sm.err = '';
     var count = sm.count;
-    var humanIds = [0].concat(seats);
+    var humanIds = [0].concat(guests);
     var names = ['玩家1', '玩家2', '玩家3', '玩家4'];
     var g = E.createGame({ playerCount: count, humanIds: humanIds, names: names });
     var UI = CIT.UI;
@@ -479,9 +484,9 @@
     UI.lastActive = 0;
     sm.syncSig = '';
     hideRoom();
-    var s = $('start'); if (s) s.classList.add('hidden');
-    var ov = $('overlay'); if (ov) { ov.classList.add('hidden'); ov.innerHTML = ''; }
-    var ps = $('pass'); if (ps) { ps.classList.add('hidden'); ps.innerHTML = ''; }
+    var s = $id('start'); if (s) s.classList.add('hidden');
+    var ov = $id('overlay'); if (ov) { ov.classList.add('hidden'); ov.innerHTML = ''; }
+    var ps = $id('pass'); if (ps) { ps.classList.add('hidden'); ps.innerHTML = ''; }
     UI.render();
     broadcast();
     UI.pump();
@@ -516,10 +521,36 @@
   };
 
   Net.sendAction = function (msg) {
-    if (sm.role !== 'guest' || !sm.guestDc || sm.guestDc.readyState !== 'open') return;
-    msg.t = 'action';
-    try { sm.guestDc.send(JSON.stringify(msg)); } catch (e) {}
+    if (sm.role !== 'guest') return;
+    var out = { t: 'action' };
+    Object.keys(msg || {}).forEach(function (k) { out[k] = msg[k]; });
+    sendTo(0, out);
   };
+
+  /* 掉线后自动托管该座位，避免整局卡死 */
+  function takeover(seat, g) {
+    var p = g.players[seat];
+    if (!p) return;
+    if (g.pending && g.pending.playerId === seat) {
+      var pick = (CIT.aiPickCharacter && CIT.aiPickCharacter(g, p)) || g.pool[0];
+      E.pickCharacter(g, pick);
+    } else if (g.humanTurn && g.humanTurn.playerId === seat) {
+      if (!g.humanTurn.actionDone) E.humanTakeGold(g);
+      var tries = 0;
+      while (g.humanTurn && g.humanTurn.buildsLeft > 0 && tries++ < 4) {
+        var opts = p.hand.filter(function (c) { return !E.buildIssue(p, c); });
+        if (!opts.length) break;
+        E.humanBuild(g, opts[0].uid);
+      }
+      E.endHumanTurn(g);
+    }
+    p.isHuman = false;
+    g.humanIds = g.humanIds.filter(function (id) { return id !== seat; });
+    CIT.UI.toastMsg(p.name + ' 掉线，已改由 AI 接管');
+    CIT.UI.render();
+    CIT.UI.pump();
+    broadcast();
+  }
 
   Net.sync = function () {
     var UI = CIT.UI;
@@ -542,12 +573,9 @@
     var UI = CIT.UI;
     var g = UI.g;
     if (!g || !UI.net || UI.net.role !== 'host') return;
-    Object.keys(sm.peers).forEach(function (k) {
-      var peer = sm.peers[Number(k)];
-      if (!peer || !peer.connected || !peer.dc || peer.dc.readyState !== 'open') return;
-      try {
-        peer.dc.send(JSON.stringify({ t: 'state', view: buildView(g, Number(k)) }));
-      } catch (e) {}
+    sm.seats.forEach(function (seat) {
+      if (seat === 0) return;
+      sendTo(seat, { t: 'state', view: buildView(g, seat) });
     });
   }
   Net.broadcast = broadcast;
@@ -585,56 +613,18 @@
     return v;
   }
 
-  /* ---------------- 扫码/哈希入口 ---------------- */
+  /* ---------------- 链接入口 ---------------- */
 
   Net.handleHash = function () {
-    var h = location.hash.replace(/^#/, '');
-    var i = h.indexOf('=');
-    if (i < 0) return false;
-    var key = h.slice(0, i);
-    var val = h.slice(i + 1);
-    if (!val) return false;
-    if (key === 'offer') {
-      sm.role = 'guest';
-      Net.joinWithOffer(val, true);
-      return true;
+    var code = '';
+    var m = /[?&]room=([A-Za-z0-9]{3,8})/.exec(location.search || '');
+    if (m) code = m[1];
+    if (!code) {
+      var h = /(?:^#|[#&])room=([A-Za-z0-9]{3,8})/.exec(location.hash || '');
+      if (h) code = h[1];
     }
-    if (key === 'resp') {
-      handleResp(val);
-      return true;
-    }
-    return false;
+    if (!code) return false;
+    Net.joinRoom(code);
+    return true;
   };
-
-  async function handleResp(code) {
-    var room = '';
-    try {
-      var ans = await unpack(code);
-      room = ans.room || '';
-    } catch (e) {}
-    if (room) {
-      try { localStorage.setItem(RESP_PREFIX + room, code); } catch (e) {}
-    }
-    showRoom(
-      '<div class="net-head"><span class="net-kicker">应答码</span></div>' +
-      '<h2>已提交给房主页面</h2>' +
-      '<p class="net-sub">如果房主页面没有自动连接，请复制下面的应答码，回到房主页面粘贴。</p>' +
-      '<textarea class="net-code" id="net-resp-code" readonly>' + esc(code) + '</textarea>' +
-      '<button class="btn primary" id="net-resp-copy">复制应答码</button>' +
-      '<p class="net-tip">完成后可以关闭本页。</p>'
-    );
-    $('net-resp-copy').addEventListener('click', function () {
-      copyText(code);
-      CIT.UI.toastMsg('应答码已复制');
-    });
-  }
-
-  window.addEventListener('storage', function (e) {
-    if (!e.key || e.key.indexOf(RESP_PREFIX) !== 0) return;
-    if (sm.role !== 'host') return;
-    var code = e.newValue;
-    try { localStorage.removeItem(e.key); } catch (err) {}
-    if (!code) return;
-    Net.applyAnswer(code).catch(function (err) { netErr(err.message); });
-  });
 })();
