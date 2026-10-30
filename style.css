@@ -1357,6 +1357,84 @@ html, body {
 
 .start-foot { margin: 22px 0 0; font-size: 10px; letter-spacing: .12em; color: rgba(155, 165, 183, .7); }
 
+/* ---------------- 插画层（生成图样张） ---------------- */
+.dc-art-img {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 50%;
+}
+.dc-art-img.is-broken { display: none; }
+
+.dcard.has-art .dc-art { background: #0c121c; }
+.dcard.has-art .dc-art > svg,
+.dcard.has-art .dc-stars,
+.dcard.has-art .dc-horizon { display: none; }
+.dcard.has-art .dc-art::after {
+  z-index: 2;
+  height: 40%;
+  background: linear-gradient(180deg, transparent 52%, rgba(20, 14, 6, .34));
+}
+.dcard.has-art .dc-type { background: rgba(12, 16, 24, .55); color: #f2dfae; }
+.dcard.has-art .dc-cost { box-shadow: 0 0 0 1px rgba(244, 228, 189, .85), 0 2px 6px rgba(0, 0, 0, .45); }
+
+.char-card.has-art {
+  justify-content: flex-end;
+  gap: 1px;
+  padding: 0 7px 9px;
+}
+.char-card.has-art::after { display: none; }
+.char-card.has-art::before { z-index: 3; }
+.char-card.has-art .cc-medal { display: none; }
+.char-card.has-art .cc-bg {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 0;
+  height: 61%;
+  overflow: hidden;
+}
+.char-card.has-art .cc-bg img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 26%;
+}
+.char-card.has-art .cc-bg::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 46%;
+  background: linear-gradient(180deg, rgba(11, 17, 28, 0), rgba(11, 17, 28, .96));
+}
+.char-card.has-art .cc-rank { z-index: 4; background: rgba(0, 0, 0, .5); }
+.char-card.has-art .cc-name { z-index: 2; margin-top: 0; font-size: 14px; }
+.char-card.has-art .cc-title { z-index: 2; }
+.char-card.has-art .cc-power { z-index: 2; }
+
+.role-face.has-art {
+  background-image:
+    linear-gradient(180deg, rgba(8, 12, 18, .05) 20%, rgba(8, 12, 18, .92)),
+    var(--art);
+  background-size: cover;
+  background-position: center 24%;
+  justify-content: flex-end;
+  padding-bottom: 2px;
+}
+.role-face.has-art b {
+  position: relative;
+  z-index: 1;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .8);
+}
+
 /* ---------------- 响应式 ---------------- */
 @media (max-height: 720px) {
   .city { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }

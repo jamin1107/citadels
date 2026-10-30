@@ -197,7 +197,9 @@
           name: def.name,
           cost: def.cost,
           type: def.type,
-          value: def.value || def.cost
+          value: def.value || def.cost,
+          art: def.art || '',
+          art2x: def.art2x || ''
         };
         deck.push(card);
       }

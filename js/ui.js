@@ -65,9 +65,14 @@
   function cardHTML(d, o) {
     o = o || {};
     var t = T[d.type] || T.special;
-    var cls = 'dcard' + (o.mini ? ' mini' : '') + (o.cls ? ' ' + o.cls : '');
+    var cls = 'dcard' + (o.mini ? ' mini' : '') + (d.art ? ' has-art' : '') + (o.cls ? ' ' + o.cls : '');
     var attrs = (o.attr ? ' ' + o.attr : '') +
       (o.uid === false ? '' : ' data-uid="' + d.uid + '" data-zone="' + (o.zone || 'hand') + '"');
+    var art = d.art
+      ? '<img class="dc-art-img" src="' + d.art + '"' +
+        (d.art2x ? ' srcset="' + d.art2x + ' 2x"' : '') +
+        ' alt="" loading="lazy" decoding="async" onerror="this.classList.add(\'is-broken\')">'
+      : '';
     return '<div class="' + cls + '" style="--c:' + t.color + ';--cd:' + t.deep +
       ';--cs:' + hexA(t.color, .2) + '"' + attrs + '>' +
       '<div class="dc-art">' +
@@ -75,7 +80,7 @@
       '<span class="dc-cost">' + d.cost + '</span>' +
       '<span class="dc-stars"></span>' +
       '<span class="dc-horizon"></span>' +
-      (CIT.BUILDINGS[d.type] || '') +
+      (CIT.BUILDINGS[d.type] || '') + art +
       '</div>' +
       '<div class="dc-name">' + esc(d.name) + '</div>' +
       '</div>';
@@ -85,9 +90,15 @@
     o = o || {};
     var c = E.charDef(id);
     var col = roleColor(id);
-    var cls = 'char-card' + (o.disabled ? ' disabled' : '') + (o.selected ? ' selected' : '');
+    var cls = 'char-card' + (c.art ? ' has-art' : '') +
+      (o.disabled ? ' disabled' : '') + (o.selected ? ' selected' : '');
+    var bg = c.art
+      ? '<span class="cc-bg"><img src="' + c.art + '"' +
+        (c.art2x ? ' srcset="' + c.art2x + ' 2x"' : '') +
+        ' alt="" loading="lazy" decoding="async" onerror="this.style.display=\'none\'"></span>'
+      : '';
     return '<button type="button" class="' + cls + '" data-char="' + id +
-      '" style="--rc:' + col + ';--rcs:' + hexA(col, .34) + '">' +
+      '" style="--rc:' + col + ';--rcs:' + hexA(col, .34) + '">' + bg +
       '<span class="cc-rank">' + id + '</span>' +
       '<span class="cc-medal">' + CIT.ICONS[c.key] + '</span>' +
       '<span class="cc-name">' + c.name + '</span>' +
@@ -534,8 +545,12 @@
       if (p.roleRevealed && p.role) {
         var def = E.charDef(p.role);
         var col = roleColor(p.role);
-        role = '<div class="opp-role role-face" style="--rc:' + col + ';--rcs:' + hexA(col, .32) + '">' +
-          CIT.ICONS[def.key] + '<b>' + def.name + '</b></div>';
+        var faceArt = def.art
+          ? '<div class="opp-role role-face has-art" style="--rc:' + col + ';--rcs:' +
+            hexA(col, .32) + ';--art:url(' + def.art + ')"><b>' + def.name + '</b></div>'
+          : '<div class="opp-role role-face" style="--rc:' + col + ';--rcs:' + hexA(col, .32) + '">' +
+            CIT.ICONS[def.key] + '<b>' + def.name + '</b></div>';
+        role = faceArt;
       } else {
         role = '<div class="role-back">?</div>';
       }

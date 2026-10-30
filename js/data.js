@@ -13,6 +13,7 @@
   CIT.CHARACTERS = [
     {
       id: 1, key: 'assassin', name: '刺客', title: '暗影之刃', short: '跳过指定角色',
+      art: 'assets/art/roles/assassin.webp', art2x: 'assets/art/roles/assassin@2x.webp',
       power: '指定一个角色，该角色本轮被跳过。',
       detail: '不能指定自己持有的角色。被刺杀的角色在本轮不会获得金币、不会建造，也不会发动能力。'
     },
@@ -28,6 +29,7 @@
     },
     {
       id: 4, key: 'king', name: '国王', title: '王冠之主', short: '+贵族金币 · 下轮先手',
+      art: 'assets/art/roles/king.webp', art2x: 'assets/art/roles/king@2x.webp',
       power: '每有 1 座贵族地区获得 1 金币；下回合由你首先选角。',
       detail: '即使国王被暗杀，皇冠仍会在本轮结束时交给该玩家。'
     },
@@ -57,7 +59,10 @@
   CIT.DISTRICTS = [
     { key: 'manor', name: '庄园', cost: 3, type: 'noble', copies: 5 },
     { key: 'castle', name: '城堡', cost: 4, type: 'noble', copies: 4 },
-    { key: 'palace', name: '宫殿', cost: 5, type: 'noble', copies: 3 },
+    {
+      key: 'palace', name: '宫殿', cost: 5, type: 'noble', copies: 3,
+      art: 'assets/art/districts/palace.webp', art2x: 'assets/art/districts/palace@2x.webp'
+    },
 
     { key: 'temple', name: '神庙', cost: 1, type: 'religious', copies: 3 },
     { key: 'church', name: '教堂', cost: 2, type: 'religious', copies: 3 },
