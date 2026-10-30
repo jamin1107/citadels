@@ -860,7 +860,7 @@
     UI.openSheet({
       title: duo ? picker.name + ' · 秘密选角' : '秘密选择角色',
       sub: '可用 ' + options.length + ' 位 · 排除 3 位。点选后其余角色会传给下一位城主。' +
-        (duo ? '请确认只有 ' + picker.name + ' 在看屏幕。' : ''),
+        (UI.mode === 'duo' ? '请确认只有 ' + picker.name + ' 在看屏幕。' : ''),
       body: body,
       footer: '<button class="btn primary" id="draft-confirm" disabled>确认选择</button>',
       onMount: function (root) {
