@@ -19,11 +19,13 @@
     },
     {
       id: 2, key: 'thief', name: '盗贼', title: '夜行扒手', short: '偷光指定角色金币',
+      art: 'assets/art/roles/thief.webp', art2x: 'assets/art/roles/thief@2x.webp',
       power: '指定一个角色，其行动开始前金币全部归你。',
       detail: '不能选择刺客、刺客的目标或自己持有的角色。'
     },
     {
       id: 3, key: 'magician', name: '魔术师', title: '幻术之手', short: '换手牌 / 弃抽',
+      art: 'assets/art/roles/magician.webp', art2x: 'assets/art/roles/magician@2x.webp',
       power: '与一名玩家交换全部手牌，或弃掉 N 张手牌再抽 N 张。',
       detail: '整手交换没有张数限制，即使自己手上没有牌也可以交换。'
     },
@@ -35,21 +37,25 @@
     },
     {
       id: 5, key: 'bishop', name: '主教', title: '圣殿守望', short: '+宗教金币 · 免拆迁',
+      art: 'assets/art/roles/bishop.webp', art2x: 'assets/art/roles/bishop@2x.webp',
       power: '每有 1 座宗教地区获得 1 金币；军阀不能破坏你的地区。',
       detail: '若主教被暗杀，本轮军阀可以正常破坏其地区。'
     },
     {
       id: 6, key: 'merchant', name: '商人', title: '金库之钥', short: '+商业金币 · 额外 1 金',
+      art: 'assets/art/roles/merchant.webp', art2x: 'assets/art/roles/merchant@2x.webp',
       power: '每有 1 座商业地区获得 1 金币，并在回合开始时额外获得 1 金币。',
       detail: '额外金币与你的行动选择无关，拿金币或抽牌都能拿到。'
     },
     {
       id: 7, key: 'architect', name: '建筑师', title: '蓝图大师', short: '+2 手牌 · 建 3 座',
+      art: 'assets/art/roles/architect.webp', art2x: 'assets/art/roles/architect@2x.webp',
       power: '行动后额外抽 2 张地区卡；本回合最多建造 3 座地区。',
       detail: '额外抽到的两张牌都进入手牌，不占用行动。'
     },
     {
       id: 8, key: 'warlord', name: '军阀', title: '铁血领主', short: '+军事金币 · 摧毁建筑',
+      art: 'assets/art/roles/warlord.webp', art2x: 'assets/art/roles/warlord@2x.webp',
       power: '每有 1 座军事地区获得 1 金币；可付费摧毁其他玩家的地区。',
       detail: '摧毁费用为地区造价的「造价 - 1」。已建成 8 座地区的城市不可被攻击。'
     }
