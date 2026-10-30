@@ -1435,19 +1435,52 @@
   };
 
   UI.showHelp = function () {
-    var items = CIT.copy.rules.map(function (r, i) {
-      return '<div class="rule-item"><span>' + (i + 1) + '</span><span>' + r + '</span></div>';
+    var flow = CIT.copy.rules.filter(function (r) { return r.indexOf('计分') !== 0; }).map(function (r, i) {
+      return '<div class="rule-item"><span>' + (i + 1) + '</span><span>' + esc(r) + '</span></div>';
     }).join('');
+
     var roles = CIT.CHARACTERS.map(function (c) {
-      return '<div class="rule-item"><span>' + c.id + '</span><span><b style="color:#f2dfae">' + c.name + '</b> · ' + c.power + '</span></div>';
+      return '<div class="help-role">' +
+        '<img src="' + c.art + '"' +
+        (c.art2x ? ' srcset="' + c.art2x + ' 2x"' : '') +
+        ' alt="" loading="lazy" decoding="async" onerror="this.style.display=\'none\'">' +
+        '<div class="hr-body"><div class="hr-rank">No.' + c.id + '</div>' +
+        '<div class="hr-name">' + esc(c.name) + '</div>' +
+        '<div class="hr-power">' + esc(c.short) + '</div></div></div>';
+    }).join('');
+
+    var colors = ['noble', 'religious', 'trade', 'military', 'special'].map(function (t) {
+      var ty = CIT.TYPES[t];
+      return '<span class="help-color"><i style="background:' + ty.color + '"></i>' + ty.name + '</span>';
+    }).join('');
+
+    var dists = CIT.DISTRICTS.filter(function (d) { return d.type === 'special'; }).map(function (d) {
+      return '<div class="help-dist">' +
+        '<img src="' + d.art + '"' +
+        (d.art2x ? ' srcset="' + d.art2x + ' 2x"' : '') +
+        ' alt="" loading="lazy" decoding="async" onerror="this.classList.add(\'is-broken\')">' +
+        '<div class="hd-body"><div class="hd-name">' + esc(d.name) +
+        (d.value >= 8 ? ' <b class="hd-pts">+8</b>' : '') + '</div>' +
+        '<div class="hd-note">' + esc(d.note || '') + '</div></div></div>';
     }).join('');
 
     UI.openSheet({
       title: '规则速览',
-      sub: '复刻经典桌游《富饶之城》，对阵 2–3 位 AI 城主。',
-      body: '<div class="group-label"><span>基本流程</span></div>' + items +
-        '<div class="group-label"><span>八位角色</span></div>' + roles +
-        '<p class="muted-note">特殊地区卡的额外效果会在卡牌详情中说明。鬼城计分时可视为任意颜色；魔法学院计算收入时可视为任意颜色。墓地会自动触发（付 1 金币取回被摧毁的地区）。<br><br>暗杀与行窃目标会显示在棋盘上方状态条；被暗杀者的身份在本轮结束时揭晓。被暗杀时你的角色标签与行动栏会变红。<br><br>双人同屏：每回合两位玩家各自秘密选角；轮到谁行动时把手机交给谁。未到回合的一方手牌、未公开角色会被隐藏，但仍建议另一位玩家自觉不看屏幕。<br><br>本作为单人对战 AI 的复刻版：3 人桌同样以 8 座地区结束；官方 2 人双角色模式未包含。</p>',
+      sub: '复刻经典桌游《富饶之城》，建成最富饶的王城。',
+      body:
+        '<div class="group-label"><span>基本流程</span></div>' + flow +
+        '<div class="group-label"><span>五色城区</span></div>' +
+        '<div class="help-colors">' + colors + '</div>' +
+        '<p class="muted-note" style="padding-top:6px">国王-贵族 · 主教-宗教 · 商人-商业 · 军阀-军事：城里每有 1 座对应颜色地区，收工资时多拿 1 金币。</p>' +
+        '<div class="group-label"><span>八位角色（按 1→8 顺序行动）</span></div>' +
+        '<div class="help-roles">' + roles + '</div>' +
+        '<div class="group-label"><span>特殊建筑（紫卡）</span></div>' +
+        '<div class="help-dists">' + dists + '</div>' +
+        '<div class="group-label"><span>计分</span></div>' +
+        '<div class="rule-item"><span>①</span><span>建筑分：每座城计卡面造价；巨龙门 / 大学建造需 6 金币，终局计 8 分。</span></div>' +
+        '<div class="rule-item"><span>②</span><span>集齐五色 +3 分，鬼城可顶替任意缺失颜色。</span></div>' +
+        '<div class="rule-item"><span>③</span><span>首位建成 8 座 +4 分，其余建成 8 座 +2 分；本轮结束即结算。</span></div>' +
+        '<p class="muted-note">暗杀与行窃目标会显示在棋盘上方状态条；被暗杀者的身份在本轮结束时揭晓。被暗杀时你的角色标签与行动栏会变红。<br><br>双人同屏：每回合两位玩家各自秘密选角；轮到谁行动时把手机交给谁。未到回合的一方手牌、未公开角色会被隐藏，但仍建议另一位玩家自觉不看屏幕。<br><br>3 人桌同样以 8 座地区结束；官方 2 人双角色模式未包含。</p>',
       footer: '<button class="btn ghost" id="help-close">关闭</button>',
       dismissible: true,
       onMount: function (root) {
