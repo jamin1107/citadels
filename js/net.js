@@ -5,6 +5,13 @@
   var Net = (CIT.Net = {});
 
   var RESP_PREFIX = 'citadels_resp_';
+  /* 手机之间互联：仅靠 mDNS 本机候选经常失败（部分路由隔离组播），补 STUN 拿公网候选 */
+  var ICE = { iceServers: [
+    { urls: ['stun:stun.qq.com:3478', 'stun:stun.miwifi.com:3478'] },
+    { urls: 'stun:stun.l.google.com:19302' }
+  ] };
+  var respChan = null;
+  try { respChan = new BroadcastChannel('citadels_resp'); } catch (e) {}
   var sm = {
     role: null,          // host | guest
     room: '',
@@ -88,7 +95,7 @@
       pc.addEventListener('icegatheringstatechange', check);
       setTimeout(function () {
         if (!done) { done = true; resolve(); }
-      }, 2500);
+      }, 5000);
     });
   }
   function makeUrl(hash) {
@@ -201,7 +208,7 @@
       try { sm.peers[sm.openSeat].pc.close(); } catch (e) {}
       delete sm.peers[sm.openSeat];
     }
-    var pc = new RTCPeerConnection({ iceServers: [] });
+    var pc = new RTCPeerConnection(ICE);
     var dc = pc.createDataChannel('game', { ordered: true });
     var peer = { pc: pc, dc: dc, connected: false, seat: seat, code: '' };
     sm.peers[seat] = peer;
@@ -219,6 +226,11 @@
 
   function bindPeer(peer) {
     var seat = peer.seat;
+    peer.pc.onconnectionstatechange = function () {
+      if (peer.pc.connectionState === 'failed' && !peer.connected) {
+        netErr('座位 ' + (seat + 1) + ' 连接失败：请确认两台设备在同一 WiFi（且路由器未隔离设备），然后点「重新生成邀请码」重试。');
+      }
+    };
     peer.dc.onopen = function () {
       peer.connected = true;
       sm.connectedSeats = Object.keys(sm.peers).filter(function (k) {
@@ -369,7 +381,10 @@
     if (expectSeat != null && ans.seat !== expectSeat) throw new Error('应答码座位不匹配');
     var peer = sm.peers[ans.seat];
     if (!peer) throw new Error('该座位的邀请已失效，请重新生成');
-    if (peer.connected) throw new Error('该座位已连接');
+    if (peer.connected) {
+      if (expectSeat != null) throw new Error('该座位已连接');
+      return; // localStorage 与 BroadcastChannel 可能双触发，幂等处理
+    }
     await peer.pc.setRemoteDescription({ type: 'answer', sdp: ans.sdp });
     // 连接在 dc.onopen 中确认
   };
@@ -384,7 +399,7 @@
       if (!off || off.type !== 'offer') throw new Error('邀请码无效');
       sm.room = off.room;
       sm.guestSeat = off.seat;
-      var pc = new RTCPeerConnection({ iceServers: [] });
+      var pc = new RTCPeerConnection(ICE);
       sm.guestPc = pc;
       pc.ondatachannel = function (ev) {
         sm.guestDc = ev.channel;
@@ -409,7 +424,7 @@
   function bindGuestDc(dc) {
     dc.onopen = function () {
       var st = $('net-guest-status');
-      if (st) st.textContent = '已连接，等待房主开始游戏…';
+      if (st) st.innerHTML = '<b style="color:#7fc98d">已连接房主！</b>等待房主开始游戏…';
       CIT.UI.toastMsg('已连接房主');
     };
     dc.onmessage = function (ev) {
@@ -450,6 +465,47 @@
       copyText(sm.answerCode);
       CIT.UI.toastMsg('应答码已复制，请发给房主');
     });
+    watchGuestConnection();
+  }
+
+  /* 客人端实时反馈连接进度，失败时给出可操作提示，不再无限"等待房主连接" */
+  function watchGuestConnection() {
+    var st = $('net-guest-status');
+    if (!st) return;
+    var cleared = false;
+    function stop() { cleared = true; }
+    sm.guestWatch = stop;
+    var poll = setInterval(function () {
+      var pc = sm.guestPc;
+      var el = $('net-guest-status');
+      if (!pc || !el || cleared || sm.role !== 'guest') { clearInterval(poll); return; }
+      if (sm.guestDc && sm.guestDc.readyState === 'open') { clearInterval(poll); return; }
+      var cs = pc.connectionState;
+      if (cs === 'new') el.textContent = '等待房主扫应答码…';
+      else if (cs === 'connecting') el.textContent = '正在与房主建立连接…';
+      else if (cs === 'failed' || cs === 'disconnected' || cs === 'closed') {
+        clearInterval(poll);
+        el.innerHTML = '<b style="color:#e08a7f">连接失败。</b>请检查：<br>' +
+          '① 两台手机连的是<b>同一个 WiFi</b>（部分 WiFi 禁止设备互访）；<br>' +
+          '② 房主扫完码后停留在房间页面；<br>' +
+          '③ 仍不行就点右上角「退出」，房主点「重新生成邀请码」再试一次。';
+      }
+    }, 800);
+    pcOnState();
+    function pcOnState() {
+      var pc = sm.guestPc;
+      if (!pc) return;
+      pc.onconnectionstatechange = function () {
+        if (cleared) return;
+        var el = $('net-guest-status');
+        if (!el || (sm.guestDc && sm.guestDc.readyState === 'open')) return;
+        var cs = pc.connectionState;
+        if (cs === 'connecting') el.textContent = '正在与房主建立连接…';
+        else if (cs === 'failed' || cs === 'disconnected' || cs === 'closed') {
+          el.innerHTML = '<b style="color:#e08a7f">连接失败。</b>请检查两台手机是否同一个 WiFi，房主是否已扫码；可退出后重新扫码。';
+        }
+      };
+    }
   }
 
   /* ---------------- 开局与同步 ---------------- */
@@ -607,18 +663,26 @@
   };
 
   async function handleResp(code) {
-    var room = '';
-    try {
-      var ans = await unpack(code);
-      room = ans.room || '';
-    } catch (e) {}
+    var ans = null;
+    try { ans = await unpack(code); } catch (e) {}
+    var room = ans ? (ans.room || '') : '';
     if (room) {
       try { localStorage.setItem(RESP_PREFIX + room, code); } catch (e) {}
+      if (respChan) {
+        try { respChan.postMessage({ room: room, code: code }); } catch (e) {}
+      }
+    }
+    /* 扫码后恰好开在房主本页（同一标签页继续是房主）时直接连接 */
+    var applied = false;
+    if (sm.role === 'host' && ans && ans.seat != null && sm.peers[ans.seat]) {
+      try { await Net.applyAnswer(code, ans.seat); applied = true; } catch (e) {}
     }
     showRoom(
       '<div class="net-head"><span class="net-kicker">应答码</span></div>' +
-      '<h2>已提交给房主页面</h2>' +
-      '<p class="net-sub">如果房主页面没有自动连接，请复制下面的应答码，回到房主页面粘贴。</p>' +
+      '<h2>' + (applied ? '已连接！回到房间页面即可' : '已提交给房主页面') + '</h2>' +
+      '<p class="net-sub">' + (applied
+        ? '应答码已在房间页面生效，请切回房主的房间页查看座位状态。'
+        : '请切回房主的房间页面查看是否已连接。如果没反应，说明扫码打开了另一个浏览器 App（两个 App 的页面不互通），请复制下面的应答码，回到<b>原来开房间页面的那个浏览器</b>里粘贴。') + '</p>' +
       '<textarea class="net-code" id="net-resp-code" readonly>' + esc(code) + '</textarea>' +
       '<button class="btn primary" id="net-resp-copy">复制应答码</button>' +
       '<p class="net-tip">完成后可以关闭本页。</p>'
@@ -629,12 +693,24 @@
     });
   }
 
+  function onRespCode(code) {
+    if (sm.role !== 'host') return;
+    Net.applyAnswer(code).catch(function (err) { netErr(err.message); });
+  }
+
+  if (respChan) {
+    respChan.onmessage = function (ev) {
+      var d = ev.data || {};
+      if (!d.code) return;
+      onRespCode(d.code);
+    };
+  }
+
   window.addEventListener('storage', function (e) {
     if (!e.key || e.key.indexOf(RESP_PREFIX) !== 0) return;
-    if (sm.role !== 'host') return;
     var code = e.newValue;
     try { localStorage.removeItem(e.key); } catch (err) {}
     if (!code) return;
-    Net.applyAnswer(code).catch(function (err) { netErr(err.message); });
+    onRespCode(code);
   });
 })();
