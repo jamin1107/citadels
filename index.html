@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>富饶之城 · 王城崛起</title>
-<link rel="stylesheet" href="style.css?v=5">
+<link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
 <div id="app">
@@ -59,26 +59,13 @@
 <div id="netroom" class="netroom hidden"></div>
 
 <div id="start" class="start">
+  <div class="start-poster" aria-hidden="true">
+    <img src="assets/art/districts/castle.webp" alt=""
+      srcset="assets/art/districts/castle@2x.webp 2x"
+      onerror="this.style.display='none'">
+    <i class="sp-veil"></i><i class="sp-ground"></i>
+  </div>
   <div class="start-inner">
-    <div class="start-art" aria-hidden="true">
-      <svg viewBox="0 0 320 170">
-        <circle cx="250" cy="40" r="17" fill="none" stroke="#d8b166" stroke-width="1" opacity=".45"/>
-        <circle cx="250" cy="40" r="24" fill="none" stroke="#d8b166" stroke-width="1" opacity=".18"/>
-        <g fill="none" stroke="#d8b166" stroke-width="1.2" opacity=".62">
-          <path d="M16 168v-34h30v34M258 168v-44h36v44"/>
-          <path d="M58 168V112h16v-9h12v9h16v56"/>
-          <path d="M150 168V80h10V60h20v20h10v88"/>
-          <path d="M190 168V112h14v-7h10v7h14v56"/>
-          <path d="M150 60V36l18 6-18 6"/>
-          <path d="M198 168v-24h26v24"/>
-        </g>
-        <path d="M0 168h320" stroke="#d8b166" stroke-width="1" opacity=".2"/>
-        <g fill="#d8b166" opacity=".35">
-          <circle cx="48" cy="48" r="1.5"/><circle cx="96" cy="30" r="1"/><circle cx="140" cy="46" r="1.3"/>
-          <circle cx="286" cy="84" r="1.2"/><circle cx="214" cy="26" r="1"/>
-        </g>
-      </svg>
-    </div>
     <h1 class="start-title">富饶之城</h1>
     <div class="start-rule"><span></span><em>CITADELS</em><span></span></div>
     <p class="start-tagline">八位角色，五色城区。<br>猜透对手，建成最富饶的王城。</p>
@@ -105,11 +92,11 @@
 /* 联机房间服务地址：部署 server/ 后把 wrangler 给出的域名填在这里，默认值见下 */
 window.CIT_NET_SERVER = new URLSearchParams(location.search).get('net') || '';
 </script>
-<script src="js/data.js?v=5"></script>
-<script src="js/engine.js?v=5"></script>
-<script src="js/ai.js?v=5"></script>
-<script src="js/qrcode.js?v=5"></script>
-<script src="js/net.js?v=5"></script>
-<script src="js/ui.js?v=5"></script>
+<script src="js/data.js?v=6"></script>
+<script src="js/engine.js?v=6"></script>
+<script src="js/ai.js?v=6"></script>
+<script src="js/qrcode.js?v=6"></script>
+<script src="js/net.js?v=6"></script>
+<script src="js/ui.js?v=6"></script>
 </body>
 </html>

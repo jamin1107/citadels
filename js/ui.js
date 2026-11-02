@@ -245,6 +245,9 @@
     UI.pass = null;
     UI.unlockedKey = null;
     UI.lastActive = null;
+    UI._citySeen = {};
+    UI._lastGold = null;
+    UI._hudRound = null;
     el.overlay.classList.add('hidden');
     el.overlay.innerHTML = '';
     el.pass.classList.add('hidden');
@@ -460,7 +463,12 @@
   /* 常驻动态条：所有提示同时留痕在这里，不再一闪而过 */
   UI.setTicker = function (text) {
     if (!el.ticker || !text) return;
-    el.ticker.textContent = text;
+    if (el.ticker.textContent !== text) {
+      el.ticker.textContent = text;
+      el.ticker.classList.remove('tk-slide');
+      void el.ticker.offsetWidth;
+      el.ticker.classList.add('tk-slide');
+    }
   };
 
   UI.showEvent = function (title, sub, icon, tone) {
@@ -533,7 +541,14 @@
   }
 
   function renderHud(g) {
-    el.round.textContent = '第 ' + Math.max(1, g.round) + ' 回合';
+    var roundText = '第 ' + Math.max(1, g.round) + ' 回合';
+    if (el.round.textContent !== roundText && UI._hudRound != null) {
+      el.round.classList.remove('tick');
+      void el.round.offsetWidth;
+      el.round.classList.add('tick');
+    }
+    UI._hudRound = g.round;
+    el.round.textContent = roundText;
 
     var text = '准备中';
     if (g.phase === 'draft') text = '秘密选角';
@@ -573,6 +588,7 @@
       }
       var pct = Math.min(100, p.city.length / 8 * 100);
       html += '<div class="opp' + (cur ? ' is-current' : '') + '" data-opp="' + p.id + '">' +
+        (cur ? '<i class="turn-flag">行动中</i>' : '') +
         role +
         '<div class="opp-body">' +
         '<div class="opp-name">' + esc(p.name) + '</div>' +
@@ -616,9 +632,18 @@
     }
 
     var html = '';
+    if (!UI._citySeen) UI._citySeen = {};
     p.city.forEach(function (d) { html += cardHTML(d, { mini: true, zone: 'city' }); });
     for (var i = p.city.length; i < 8; i++) html += '<div class="slot-empty">＋</div>';
     el.city.innerHTML = html;
+    /* 新建成的卡牌做一次飞入动画（仅该次渲染触发） */
+    if (UI._citySeen[p.id] != null && p.city.length > UI._citySeen[p.id]) {
+      var built = el.city.children[p.city.length - 1];
+      if (built && built.classList && built.classList.contains('dcard')) {
+        built.classList.add('just-built');
+      }
+    }
+    UI._citySeen[p.id] = p.city.length;
 
     var hint = '';
     if (g.over) hint = '对局结束，点击「查看结算」查看本局得分。';
@@ -665,6 +690,16 @@
     var canBuild = !!(ht && mineTurn && ht.actionDone && ht.buildsLeft > 0);
     var goldP = net ? viewed : (active || viewed);
     el.goldChip.innerHTML = COIN + '<span>' + goldP.gold + '</span>';
+    /* 金币变动飘字 */
+    if (UI._lastGold != null && goldP.gold !== UI._lastGold) {
+      var diff = goldP.gold - UI._lastGold;
+      var fl = document.createElement('i');
+      fl.className = 'coin-float' + (diff > 0 ? ' up' : ' down');
+      fl.textContent = (diff > 0 ? '+' : '') + diff;
+      el.goldChip.appendChild(fl);
+      setTimeout(function () { if (fl.parentNode) fl.parentNode.removeChild(fl); }, 1400);
+    }
+    UI._lastGold = goldP.gold;
     if (el.handTitle) {
       el.handTitle.textContent = net ? '手牌'
         : (duo ? (active ? active.name + ' 的手牌' : '手牌已隐藏') : '手牌');
@@ -1405,13 +1440,26 @@
     var net = UI.mode === 'net' && UI.net;
     var rows = g.results.map(function (r, i) {
       var isMe = net ? (r.id === UI.net.seat) : (r.isHuman && !duo);
-      return '<div class="score-row' + (r.winner ? ' win' : '') + '">' +
-        '<div class="score-rank">' + (r.winner ? '♛' : (i + 1)) + '</div>' +
+      var medal = i === 0 ? '<span class="rk-medal m1">♛</span>'
+        : (i === 1 ? '<span class="rk-medal m2">2</span>'
+          : (i === 2 ? '<span class="rk-medal m3">3</span>'
+            : '<span class="rk-medal">' + (i + 1) + '</span>'));
+      var winner = r.winner ? ' win top1' : (i === 1 ? ' top2' : (i === 2 ? ' top3' : ''));
+      var totalCls = 'score-total' + (r.winner ? ' big' : '');
+      var parts = [
+        { k: '基础', v: r.base },
+        { k: '五色', v: r.colorBonus },
+        { k: '八座', v: r.firstBonus }
+      ].filter(function (x) { return x.v > 0; })
+        .map(function (x) { return '<i>' + x.k + '+' + x.v + '</i>'; }).join('');
+      return '<div class="score-row' + winner + (isMe ? ' me' : '') + '" style="animation-delay:' +
+        (i * 0.09).toFixed(2) + 's">' +
+        '<div class="score-rank">' + medal + '</div>' +
         '<div class="score-main"><div class="score-name' + (isMe ? ' you' : '') + '">' +
-        esc(r.name) + (isMe ? '（你）' : '') + '</div>' +
-        '<div class="score-sub">' + r.districts + ' 座地区 · 基础 ' + r.base +
-        ' + 五色 ' + r.colorBonus + ' + 八座 ' + r.firstBonus + '</div></div>' +
-        '<div class="score-total">' + r.total + '</div></div>';
+        esc(r.name) + (isMe ? '（你）' : '') + (r.winner ? '<i class="win-crown">👑</i>' : '') + '</div>' +
+        '<div class="score-sub">' + r.districts + ' 座地区</div>' +
+        '<div class="score-parts">' + parts + '</div></div>' +
+        '<div class="' + totalCls + '">' + r.total + '<em>分</em></div></div>';
     }).join('');
 
     var winLine = '得分最高的城主获得胜利。';
