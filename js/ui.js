@@ -149,6 +149,7 @@
     el.actionbar = $('actionbar');
     el.eventLayer = $('event-layer');
     el.toast = $('toast');
+    el.ticker = $('ticker-text');
     el.pass = $('pass');
     el.modeNote = $('mode-note');
 
@@ -251,6 +252,7 @@
     el.start.classList.add('hidden');
     el.toast.textContent = '';
     el.toast.classList.remove('show');
+    if (el.ticker) el.ticker.textContent = '';
     if (el.eventLayer) el.eventLayer.innerHTML = '';
     UI.render();
     UI.pump();
@@ -371,7 +373,7 @@
     var delay = 820;
     if (r === 'reveal') delay = 1000;
     else if (r === 'aiTurn') delay = 1050;
-    else if (r === 'draftPick') delay = 480;
+    else if (r === 'draftPick') delay = 720;
     else if (r === 'roundStart') delay = 900;
     UI.timer = setTimeout(UI.pump, delay);
   };
@@ -455,7 +457,14 @@
     UI.toastMsg(ev.text);
   };
 
+  /* 常驻动态条：所有提示同时留痕在这里，不再一闪而过 */
+  UI.setTicker = function (text) {
+    if (!el.ticker || !text) return;
+    el.ticker.textContent = text;
+  };
+
   UI.showEvent = function (title, sub, icon, tone) {
+    UI.setTicker(title + ' · ' + sub);
     if (!el.eventLayer) return;
     UI.eventUntil = Date.now() + 2600;
     el.eventLayer.innerHTML = '<div class="event-banner tone-' + (tone || 'gold') + '">' +
@@ -477,6 +486,7 @@
 
   UI.toastMsg = function (text) {
     if (!text) return;
+    UI.setTicker(text); // 动态条常驻留痕，不受横幅抑制影响
     if (Date.now() < (UI.eventUntil || 0)) return;
     el.toast.textContent = text;
     el.toast.classList.add('show');
@@ -876,6 +886,13 @@
       '<div class="ex-head"><span>你的王城 · ' + picker.city.length + ' 座 · ' + picker.gold + ' 金币</span>' +
       '<em>照建筑颜色选收入角色</em></div>' +
       '<div class="draft-city-row">' + cityRow + '</div></div>' +
+      '<div class="ex-block"><div class="ex-head"><span>对手动向</span><em>金币 / 建筑数 · 点击对手牌桌可看详情</em></div>' +
+      '<div class="draft-opp-row">' +
+      g.players.filter(function (o) { return o.id !== picker.id; }).map(function (o) {
+        return '<div class="opp-chip"><b>' + esc(o.name) + '</b>' +
+          '<span>' + COIN + o.gold + '</span><span>城 ' + o.city.length + '</span></div>';
+      }).join('') +
+      '</div></div>' +
       '<div class="ex-block">' +
       '<div class="ex-head"><span>本回合排除的角色</span><em>这 3 位不会登场</em></div>' +
       '<div class="ex-row">' +
@@ -991,7 +1008,14 @@
     var ids = [1, 2, 3, 4, 5, 6, 7, 8].filter(function (id) {
       return id !== 1 && id !== g.killed && id !== ht.charId && g.excludedKnown.indexOf(id) < 0;
     });
-    var body = '<p class="muted-note">不能选择刺客、刺客的目标，或自己持有的角色。对方行动开始前，其金币全部归你。</p>' +
+    var me = E.humanPlayer(g);
+    var foes = g.players.filter(function (o) { return o.id !== me.id; }).map(function (o) {
+      return '<div class="foe-row"><b>' + esc(o.name) + '</b>' +
+        '<span class="fr-city">城 ' + o.city.length + ' 座</span>' +
+        '<span class="fr-gold">' + COIN + o.gold + ' 金币</span></div>';
+    }).join('');
+    var body = '<div class="foe-list">' + foes + '</div>' +
+      '<p class="muted-note">钱袋按角色持有，不知道谁拿着哪个角色。不能选刺客、刺客的目标或自己持有的角色；对方行动开始前，其金币全部归你。</p>' +
       '<div class="char-grid">' + ids.map(function (id) { return charCardHTML(id); }).join('') + '</div>';
     charPicker({
       title: '行窃',

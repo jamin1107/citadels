@@ -1137,6 +1137,70 @@ html, body {
 .ex-head em { font-style: normal; font-size: 9px; color: var(--muted); }
 .ex-row { display: flex; gap: 8px; justify-content: center; }
 
+/* 常驻动态条：最近一条对局事件不消失，被新事件替换 */
+.ticker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 10px 4px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(216, 177, 102, .16);
+  background: rgba(10, 15, 26, .55);
+  min-height: 22px;
+}
+.tk-tag {
+  flex: 0 0 auto;
+  font-size: 9px;
+  letter-spacing: .12em;
+  color: var(--gold2);
+  border: 1px solid rgba(216, 177, 102, .35);
+  border-radius: 4px;
+  padding: 0 4px;
+  line-height: 14px;
+}
+.tk-text {
+  font-size: 10.5px;
+  color: #d8cba8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 选角弹层 · 对手概览 */
+.draft-opp-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 2px 2px; }
+.opp-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(216, 177, 102, .22);
+  background: linear-gradient(165deg, #1a2334, #101827);
+  font-size: 10px;
+  color: var(--muted);
+}
+.opp-chip b { color: #e8dcbf; font-size: 10.5px; }
+.opp-chip .coin-ico { width: 11px; height: 11px; vertical-align: -2px; }
+.opp-chip span { color: #cfc29c; }
+
+/* 行窃选角 · 对手钱袋参考 */
+.foe-list { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
+.foe-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  border: 1px solid rgba(216, 177, 102, .18);
+  background: rgba(16, 24, 39, .7);
+  font-size: 11px;
+}
+.foe-row b { color: #e8dcbf; }
+.foe-row .fr-gold { margin-left: auto; color: #f0d79b; display: flex; align-items: center; gap: 4px; }
+.foe-row .coin-ico { width: 12px; height: 12px; }
+.foe-row .fr-city { color: var(--muted); }
+
 /* 选角弹层 · 自己的王城 */
 .draft-city-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 2px 2px; }
 .draft-city-row .dcard { flex: 0 0 72px; min-height: 108px; }

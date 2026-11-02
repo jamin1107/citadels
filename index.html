@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>富饶之城 · 王城崛起</title>
-<link rel="stylesheet" href="style.css?v=4">
+<link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 <div id="app">
@@ -26,6 +26,7 @@
 
   <section class="opponents" id="opponents"></section>
   <section class="statusbar" id="statusbar"></section>
+  <section class="ticker" id="ticker"><span class="tk-tag">动态</span><span class="tk-text" id="ticker-text"></span></section>
 
   <section class="board" id="board">
     <div class="board-head">
@@ -104,11 +105,11 @@
 /* 联机房间服务地址：部署 server/ 后把 wrangler 给出的域名填在这里，默认值见下 */
 window.CIT_NET_SERVER = new URLSearchParams(location.search).get('net') || '';
 </script>
-<script src="js/data.js?v=4"></script>
-<script src="js/engine.js?v=4"></script>
-<script src="js/ai.js?v=4"></script>
-<script src="js/qrcode.js?v=4"></script>
-<script src="js/net.js?v=4"></script>
-<script src="js/ui.js?v=4"></script>
+<script src="js/data.js?v=5"></script>
+<script src="js/engine.js?v=5"></script>
+<script src="js/ai.js?v=5"></script>
+<script src="js/qrcode.js?v=5"></script>
+<script src="js/net.js?v=5"></script>
+<script src="js/ui.js?v=5"></script>
 </body>
 </html>
